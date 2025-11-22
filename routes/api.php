@@ -22,8 +22,11 @@ Route::middleware(['auth:api'])->group(function () {
 
     // Wallet Operations
     Route::prefix('wallet')->group(function () {
-        Route::get('balance', function() {
-            return response()->json(['todo' => 'implementar saldo']);
-        });
+        Route::get('balance', [App\Http\Controllers\WalletController::class, 'balance']);
+        Route::get('transactions', [App\Http\Controllers\WalletController::class, 'transactions']);
+        
+        Route::post('deposit', [App\Http\Controllers\WalletController::class, 'deposit']);
+        Route::post('withdraw', [App\Http\Controllers\WalletController::class, 'withdraw']);
+        Route::post('transfer', [App\Http\Controllers\WalletController::class, 'transfer']);
     });
 });
