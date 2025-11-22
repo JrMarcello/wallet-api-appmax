@@ -1,0 +1,70 @@
+services:
+    app:
+        build: .
+        image: wallet-app
+        container_name: wallet_app
+        restart: unless-stopped
+        working_dir: /var/www
+        volumes:
+            - ./:/var/www
+        ports:
+            - "8000:8000"
+        networks:
+            - wallet-network
+        depends_on:
+            - db
+            - redis
+
+    queue:
+        build: .
+        image: wallet-queue
+        container_name: wallet_queue
+        restart: unless-stopped
+        working_dir: /var/www
+        volumes:
+            - ./:/var/www
+        # O worker processa os jobs da fila
+        command: "php artisan queue:work --tries=3 --timeout=90"
+        networks:
+            - wallet-network
+        depends_on:
+            - app
+            - db
+            - redis
+
+    db:
+        image: mysql:8.0
+        container_name: wallet_db
+        restart: unless-stopped
+        environment:
+            MYSQL_DATABASE: wallet
+            MYSQL_ROOT_PASSWORD: root
+            MYSQL_PASSWORD: root
+            MYSQL_USER: walletuser
+            MYSQL_ALLOW_EMPTY_PASSWORD: 1
+        volumes:
+            - mysql-data:/var/lib/mysql
+        ports:
+            - "3306:3306"
+        networks:
+            - wallet-network
+        command: --default-authentication-plugin=mysql_native_password
+
+    redis:
+        image: redis:alpine
+        container_name: wallet_redis
+        restart: unless-stopped
+        ports:
+            - "6379:6379"
+        networks:
+            - wallet-network
+        volumes:
+            - redis-data:/data
+
+networks:
+    wallet-network:
+        driver: bridge
+
+volumes:
+    mysql-data:
+    redis-data:
