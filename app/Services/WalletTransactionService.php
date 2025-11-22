@@ -6,6 +6,7 @@ use App\Domain\Wallet\WalletAggregate;
 use App\Models\Wallet;
 use App\Repositories\WalletRepository;
 use Illuminate\Database\DatabaseManager;
+use Illuminate\Support\Facades\Log;
 use Exception;
 
 class WalletTransactionService
@@ -20,29 +21,38 @@ class WalletTransactionService
      */
     public function deposit(string $userId, int $amount): array
     {
-        return $this->db->transaction(function () use ($userId, $amount) {
-            // 1. Lock & Load: Buscamos o ID da carteira travando a linha
-            // Isso impede que outro processo altere essa carteira agora (Race Condition)
-            $walletModel = Wallet::where('user_id', $userId)->lockForUpdate()->firstOrFail();
-            $walletId = $walletModel->id;
+        $ctx = ['user_id' => $userId, 'amount' => $amount, 'operation' => 'deposit'];
+        Log::info("Wallet Deposit: Start", $ctx);
 
-            // 2. Event Sourcing: Reconstruir o estado
-            $history = $this->repository->getHistory($walletId);
-            $aggregate = WalletAggregate::retrieve($walletId, $history);
+        try {
+            return $this->db->transaction(function () use ($userId, $amount, $ctx) {
+                $walletModel = Wallet::where('user_id', $userId)->lockForUpdate()->firstOrFail();
+                $walletId = $walletModel->id;
 
-            // 3. Domain Logic: Executar ação
-            $newEvent = $aggregate->deposit($amount);
+                $ctx['wallet_id'] = $walletId;
 
-            // 4. Persistência: Salvar evento + Atualizar Projeção
-            $this->repository->append($newEvent);
-            $this->repository->updateProjection($walletId, $aggregate->getBalance()); // Saldo novo já calculado
+                $history = $this->repository->getHistory($walletId);
+                $aggregate = WalletAggregate::retrieve($walletId, $history);
 
-            return [
-                'wallet_id' => $walletId,
-                'new_balance' => $aggregate->getBalance(),
-                'transaction_id' => $walletId // Poderíamos retornar o ID do evento também
-            ];
-        });
+                $newEvent = $aggregate->deposit($amount);
+
+                $this->repository->append($newEvent);
+                $this->repository->updateProjection($walletId, $aggregate->getBalance());
+
+                Log::info("Wallet Deposit: Success", array_merge($ctx, [
+                    'new_balance' => $aggregate->getBalance()
+                ]));
+
+                return [
+                    'wallet_id' => $walletId,
+                    'new_balance' => $aggregate->getBalance(),
+                    'transaction_id' => $walletId
+                ];
+            });
+        } catch (Exception $e) {
+            Log::error("Wallet Deposit: Failed - " . $e->getMessage(), $ctx);
+            throw $e;
+        }
     }
 
     /**
@@ -50,32 +60,38 @@ class WalletTransactionService
      */
     public function withdraw(string $userId, int $amount): array
     {
-        return $this->db->transaction(function () use ($userId, $amount) {
-            // 1. Lock Pessimista
-            $walletModel = Wallet::where('user_id', $userId)->lockForUpdate()->firstOrFail();
-            $walletId = $walletModel->id;
+        $ctx = ['user_id' => $userId, 'amount' => $amount, 'operation' => 'withdraw'];
+        Log::info("Wallet Withdraw: Start", $ctx);
 
-            // 2. Replay
-            $history = $this->repository->getHistory($walletId);
-            $aggregate = WalletAggregate::retrieve($walletId, $history);
+        try {
+            return $this->db->transaction(function () use ($userId, $amount, $ctx) {
+                $walletModel = Wallet::where('user_id', $userId)->lockForUpdate()->firstOrFail();
+                $walletId = $walletModel->id;
+                $ctx['wallet_id'] = $walletId;
 
-            // 3. Domain Logic (Aqui pode estourar Exception de Saldo Insuficiente)
-            $newEvent = $aggregate->withdraw($amount);
+                $history = $this->repository->getHistory($walletId);
+                $aggregate = WalletAggregate::retrieve($walletId, $history);
 
-            // 4. Persistência
-            $this->repository->append($newEvent);
-            $this->repository->updateProjection($walletId, $aggregate->getBalance());
+                $newEvent = $aggregate->withdraw($amount);
 
-            return [
-                'wallet_id' => $walletId,
-                'new_balance' => $aggregate->getBalance()
-            ];
-        });
+                $this->repository->append($newEvent);
+                $this->repository->updateProjection($walletId, $aggregate->getBalance());
+
+                Log::info("Wallet Withdraw: Success", array_merge($ctx, [
+                    'new_balance' => $aggregate->getBalance()
+                ]));
+
+                return [
+                    'wallet_id' => $walletId,
+                    'new_balance' => $aggregate->getBalance()
+                ];
+            });
+        } catch (Exception $e) {
+            Log::error("Wallet Withdraw: Failed - " . $e->getMessage(), $ctx);
+            throw $e;
+        }
     }
     
-    /**
-     * Consulta de Saldo Rápida (Sem replay, direto da projeção)
-     */
     public function getBalance(string $userId): int 
     {
         return Wallet::where('user_id', $userId)->value('balance') ?? 0;
@@ -86,66 +102,75 @@ class WalletTransactionService
      */
     public function transfer(string $payerUserId, string $payeeUserId, int $amount): array
     {
-        // Regra básica: não pode transferir para si mesmo
+        $ctx = [
+            'payer_user_id' => $payerUserId,
+            'payee_user_id' => $payeeUserId,
+            'amount' => $amount,
+            'operation' => 'transfer_p2p'
+        ];
+
+        Log::info("P2P Transfer: Start", $ctx);
+
         if ($payerUserId === $payeeUserId) {
+            Log::warning("P2P Transfer: Blocked (Self Transfer)", $ctx);
             throw new \InvalidArgumentException("Cannot transfer to self");
         }
 
-        return $this->db->transaction(function () use ($payerUserId, $payeeUserId, $amount) {
-            // 1. Lock Strategy (Deadlock Prevention)
-            // Precisamos descobrir os IDs das wallets primeiro para saber a ordem de lock
-            // Se A manda pra B, e B manda pra A ao mesmo tempo, pode dar Deadlock se não ordenarmos.
-            
-            // Buscamos os IDs (sem lock ainda, leitura rápida)
-            $payerWalletId = Wallet::where('user_id', $payerUserId)->value('id');
-            $payeeWalletId = Wallet::where('user_id', $payeeUserId)->value('id');
+        try {
+            return $this->db->transaction(function () use ($payerUserId, $payeeUserId, $amount, $ctx) {
+                // 1. Lock Strategy
+                $payerWalletId = Wallet::where('user_id', $payerUserId)->value('id');
+                $payeeWalletId = Wallet::where('user_id', $payeeUserId)->value('id');
 
-            if (!$payerWalletId || !$payeeWalletId) {
-                throw new \Exception("One or both users do not have a wallet configured.");
-            }
+                if (!$payerWalletId || !$payeeWalletId) {
+                    throw new \Exception("One or both users do not have a wallet configured.");
+                }
 
-            // Ordenamos os IDs para garantir que sempre lockamos na mesma ordem (ex: menor -> maior)
-            $idsToLock = [$payerWalletId, $payeeWalletId];
-            sort($idsToLock);
+                $idsToLock = [$payerWalletId, $payeeWalletId];
+                sort($idsToLock);
 
-            // Agora aplicamos o Lock For Update na ordem correta
-            // Isso evita que Processo 1 trave A e queira B, enquanto Processo 2 trava B e quer A.
-            $lockedWallets = Wallet::whereIn('id', $idsToLock)->lockForUpdate()->get()->keyBy('id');
+                // LOG CRÍTICO: Mostra a ordem do Lock. Vital para debugar Deadlocks.
+                Log::debug("P2P Transfer: Acquiring Locks", ['sorted_lock_ids' => $idsToLock]);
+                
+                $lockedWallets = Wallet::whereIn('id', $idsToLock)->lockForUpdate()->get();
 
-            // 2. Replay dos Agregados
-            // Payer (Pagador)
-            $payerHistory = $this->repository->getHistory($payerWalletId);
-            $payerAggregate = WalletAggregate::retrieve($payerWalletId, $payerHistory);
+                // 2. Replay
+                $payerHistory = $this->repository->getHistory($payerWalletId);
+                $payerAggregate = WalletAggregate::retrieve($payerWalletId, $payerHistory);
 
-            // Payee (Recebedor)
-            $payeeHistory = $this->repository->getHistory($payeeWalletId);
-            $payeeAggregate = WalletAggregate::retrieve($payeeWalletId, $payeeHistory);
+                $payeeHistory = $this->repository->getHistory($payeeWalletId);
+                $payeeAggregate = WalletAggregate::retrieve($payeeWalletId, $payeeHistory);
 
-            // 3. Domain Logic (Ação Dupla)
-            // O Pagador tenta enviar (Valida saldo aqui)
-            $eventSent = $payerAggregate->sendTransfer($payeeWalletId, $amount);
-            
-            // O Recebedor aceita
-            $eventReceived = $payeeAggregate->receiveTransfer($payerWalletId, $amount);
+                // 3. Domain Logic
+                $eventSent = $payerAggregate->sendTransfer($payeeWalletId, $amount);
+                $eventReceived = $payeeAggregate->receiveTransfer($payerWalletId, $amount);
 
-            // 4. Persistência Atômica
-            // Salva Evento de Saída
-            $this->repository->append($eventSent);
-            $this->repository->updateProjection($payerWalletId, $payerAggregate->getBalance());
+                // 4. Persistência
+                $this->repository->append($eventSent);
+                $this->repository->updateProjection($payerWalletId, $payerAggregate->getBalance());
 
-            // Salva Evento de Entrada
-            $this->repository->append($eventReceived);
-            $this->repository->updateProjection($payeeWalletId, $payeeAggregate->getBalance());
-            
-            // 5. Disparo de Webhook (Fase de Bônus)
-            // Dispara assincronamente para a fila Redis
-            \App\Jobs\SendTransactionNotification::dispatch($payeeUserId, $amount);
+                $this->repository->append($eventReceived);
+                $this->repository->updateProjection($payeeWalletId, $payeeAggregate->getBalance());
+                
+                // 5. Webhook
+                Log::info("P2P Transfer: Dispatching Webhook Job", ['payee_user_id' => $payeeUserId]);
+                \App\Jobs\SendTransactionNotification::dispatch($payeeUserId, $amount);
 
-            return [
-                'transaction_id' => $payerWalletId . '-' . time(), // Id fictício de rastreio
-                'payer_balance' => $payerAggregate->getBalance(),
-                'payee_id' => $payeeUserId
-            ];
-        });
+                Log::info("P2P Transfer: Success", array_merge($ctx, [
+                    'payer_wallet_id' => $payerWalletId,
+                    'payee_wallet_id' => $payeeWalletId,
+                    'final_payer_balance' => $payerAggregate->getBalance()
+                ]));
+
+                return [
+                    'transaction_id' => $payerWalletId . '-' . time(),
+                    'payer_balance' => $payerAggregate->getBalance(),
+                    'payee_id' => $payeeUserId
+                ];
+            });
+        } catch (Exception $e) {
+            Log::error("P2P Transfer: Failed - " . $e->getMessage(), $ctx);
+            throw $e;
+        }
     }
 }

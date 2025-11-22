@@ -6,6 +6,7 @@ use Closure;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
 use Symfony\Component\HttpFoundation\Response;
 
 class CheckIdempotency
@@ -15,48 +16,63 @@ class CheckIdempotency
      */
     public function handle(Request $request, Closure $next): Response
     {
-        // 1. Apenas métodos de escrita precisam de idempotência
         if (!$request->isMethod('POST') && !$request->isMethod('PUT') && !$request->isMethod('PATCH')) {
             return $next($request);
         }
 
-        // 2. Verificar Header
+        // Check Header Idempotency-Key
+        // Idempotencia é opcional, então só age se o header estiver presente
         $key = $request->header('Idempotency-Key');
-
         if (!$key) {
-            // Para fins deste teste, não vamos bloquear se faltar, 
-            // mas em prod retornaríamos 400 Bad Request.
             return $next($request);
         }
 
-        $userId = auth('api')->id() ?? 'guest';
+        $user = auth('api')->user();
+        $userId = $user ? $user->id : 'guest';
         $cacheKey = "idempotency_{$userId}_{$key}";
-
-        // 3. Check Cache (Redis)
+        
+        $ctx = ['key' => $key, 'user_id' => $userId, 'method' => $request->method()];
+        
         if (Cache::has($cacheKey)) {
+            Log::info("Idempotency: HIT (Redis)", $ctx);
             $cachedResponse = Cache::get($cacheKey);
             
-            // Retorna a MESMA resposta anterior, mas adiciona um header avisando
             return response()->json(
                 $cachedResponse['content'], 
                 $cachedResponse['status']
             )->header('X-Idempotency-Hit', 'true');
         }
 
-        // 4. Processar Request
-        $response = $next($request);
+        Log::debug("Idempotency: MISS (Processing)", $ctx);
 
-        // 5. Salvar no Cache (Apenas se foi sucesso 2xx)
+        $response = $next($request);
         if ($response->isSuccessful()) {
-            $content = json_decode($response->getContent(), true);
+            Log::debug("Idempotency: STORE", $ctx);
             
+            // Pegamos o conteúdo cru para salvar string no banco e array no Redis
+            $rawContent = $response->getContent();
+            $contentArray = json_decode($rawContent, true);
+            
+            // Salvar no Redis (Rápido, TTL curto de 24h)
             Cache::put($cacheKey, [
                 'status' => $response->getStatusCode(),
-                'content' => $content
-            ], now()->addDay()); // TTL 24h
+                'content' => $contentArray
+            ], now()->addDay());
 
-            // Opcional: Salvar no DB também para auditoria (na tabela idempotency_keys que criamos)
-            // DB::table('idempotency_keys')->insert(...)
+            // Salvar no MySQL (Auditoria, Persistente)
+            // try/catch para não bloquear a resposta ao cliente
+            try {
+                DB::table('idempotency_keys')->insertOrIgnore([
+                    'key' => $key,
+                    'user_id' => $user ? $user->id : null, // Nullable no banco
+                    'response_json' => $rawContent, // Salva o JSON exato retornado
+                    'status_code' => $response->getStatusCode(),
+                    'created_at' => now(),
+                    'expires_at' => now()->addDay(), // Mantemos a semântica de expiração
+                ]);
+            } catch (\Exception $e) {
+                Log::error("Idempotency: DB Persist Failed - " . $e->getMessage(), $ctx);
+            }
         }
 
         return $response;
