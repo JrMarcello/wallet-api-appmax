@@ -39,3 +39,9 @@ reset:
 	@echo "🧹 Limpando cache e chaves de idempotência..."
 	docker-compose exec app php artisan cache:clear
 	@echo "✅ Reset concluído! Lembre-se de criar um novo usuário."
+
+# Roda o teste de concorrência (Stress Test via Bash)
+race:
+	@echo "🏎️  Preparando pista de corrida (Race Condition Test)..."
+	@chmod +x tests/race_test.sh
+	@./tests/race_test.sh
