@@ -27,7 +27,23 @@ describe('Wallet Deposit', function () {
         Wallet::create(['user_id' => $user->id, 'balance' => 0, 'version' => 1]);
         $token = JWTAuth::fromUser($user);
 
-        postJson('/api/wallet/deposit', ['amount' => -100], ['Authorization' => "Bearer $token"])
+        postJson('/api/wallet/deposit', ['amount' => -100], [
+            'Authorization' => "Bearer $token",
+            'Idempotency-Key' => 'error-test-key',
+        ])
             ->assertStatus(422);
+    });
+
+    test('it requires idempotency key for write operations', function () {
+        $user = User::factory()->create();
+        Wallet::create(['user_id' => $user->id]);
+        $token = JWTAuth::fromUser($user);
+
+        // Tenta depositar SEM o header
+        postJson('/api/wallet/deposit', ['amount' => 100], [
+            'Authorization' => "Bearer $token",
+            // 'Idempotency-Key' => omitido propositalmente
+        ])->assertStatus(400) // Bad Request
+            ->assertJsonFragment(['message' => 'Header "Idempotency-Key" is required for state-changing operations.']);
     });
 });

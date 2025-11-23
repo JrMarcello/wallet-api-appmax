@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use App\Domain\Wallet\Exceptions\InsufficientFundsException;
 use App\Http\Requests\Wallet\MakeDepositRequest;
 use App\Http\Requests\Wallet\MakeTransferRequest;
 use App\Http\Requests\Wallet\MakeWithdrawRequest;
@@ -9,7 +10,9 @@ use App\Http\Traits\ApiResponse;
 use App\Models\User;
 use App\Repositories\WalletRepository;
 use App\Services\WalletTransactionService;
+use Illuminate\Database\Eloquent\ModelNotFoundException;
 use Illuminate\Http\JsonResponse;
+use InvalidArgumentException;
 
 class WalletController extends Controller
 {
@@ -20,9 +23,6 @@ class WalletController extends Controller
         protected WalletRepository $repository
     ) {}
 
-    /**
-     * GET /api/wallet/balance
-     */
     public function balance(): JsonResponse
     {
         $userId = auth('api')->id();
@@ -34,27 +34,16 @@ class WalletController extends Controller
         ]);
     }
 
-    /**
-     * POST /api/wallet/deposit
-     */
     public function deposit(MakeDepositRequest $request): JsonResponse
     {
-        try {
-            $result = $this->service->deposit(
-                auth('api')->id(),
-                $request->amount
-            );
+        $result = $this->service->deposit(
+            auth('api')->id(),
+            $request->amount
+        );
 
-            return $this->success($result, 'Depósito realizado com sucesso.');
-        } catch (\Exception $e) {
-            // Em prod, logariamos o erro real e retornariamos msg genérica
-            return $this->error($e->getMessage(), 400);
-        }
+        return $this->success($result, 'Depósito realizado com sucesso.');
     }
 
-    /**
-     * POST /api/wallet/withdraw
-     */
     public function withdraw(MakeWithdrawRequest $request): JsonResponse
     {
         try {
@@ -64,58 +53,80 @@ class WalletController extends Controller
             );
 
             return $this->success($result, 'Saque realizado com sucesso.');
-        } catch (\Exception $e) {
-            // Captura o "InsufficientFundsException" do domínio
+
+        } catch (InsufficientFundsException|InvalidArgumentException $e) {
+            // Tratamos erro de domínio (Saldo ou Valor) como Bad Request (400)
             return $this->error($e->getMessage(), 400);
         }
     }
 
-    /**
-     * POST /api/wallet/transfer
-     */
     public function transfer(MakeTransferRequest $request): JsonResponse
     {
         try {
-            // Resolvendo Email -> ID do destino
             $targetUser = User::where('email', $request->target_email)->firstOrFail();
-
             $result = $this->service->transfer(
-                auth('api')->id(), // Payer
-                $targetUser->id,   // Payee
+                auth('api')->id(),
+                $targetUser->id,
                 $request->amount
             );
 
             return $this->success($result, 'Transferência realizada com sucesso.');
-        } catch (\Exception $e) {
+
+        } catch (ModelNotFoundException $e) {
+            // Destinatário não existe -> 404
+            return $this->error('Destinatário não encontrado.', 404);
+
+        } catch (InsufficientFundsException|InvalidArgumentException $e) {
+            // Regras de Negócio (Saldo, Auto-transferência) -> 400
             return $this->error($e->getMessage(), 400);
         }
     }
 
-    /**
-     * GET /api/wallet/transactions
-     * Retorna o "Extrato" (Replay dos Eventos)
-     */
     public function transactions(): JsonResponse
     {
-        $walletId = auth('api')->user()->wallet->id;
+        /** @var User $user */
+        $user = auth('api')->user();
 
-        // Usamos o Repository para buscar os eventos puros
-        $history = $this->repository->getHistory($walletId);
+        // Previne erro caso usuário não tenha carteira
+        if (! $user->wallet) {
+            return $this->error('Carteira não encontrada.', 404);
+        }
 
-        // Transformamos os objetos de evento em Array para JSON
-        $formattedHistory = array_map(function ($event) {
-            return [
-                'type' => class_basename($event), // "FundsDeposited"
-                'amount' => $event->amount,
-                'date' => $event->occurredAt->format('Y-m-d H:i:s'),
-                'details' => match (class_basename($event)) {
-                    'TransferSent' => ['to' => $event->targetWalletId],
-                    'TransferReceived' => ['from' => $event->sourceWalletId],
-                    default => []
+        $formattedHistory = array_map(
+            function ($event) {
+                return [
+                    'type' => class_basename($event),
+                    'amount' => $event->amount,
+                    // Formato ISO seguro ou amigável
+                    'date' => $event->occurredAt->format('Y-m-d H:i:s'),
+                    'details' => match (class_basename($event)) {
+                        'TransferSent' => ['to' => $event->targetWalletId],
+                        'TransferReceived' => ['from' => $event->sourceWalletId],
+                        default => []
+                    },
+                ];
+            },
+            $this->repository->getHistory($user->wallet->id)
+        );
+
+        return $this->success(
+            // Retorna o histórico de transações formatado
+            array_map(
+                function ($event) {
+                    return [
+                        'type' => class_basename($event),
+                        'amount' => $event->amount,
+                        // Formato ISO seguro ou amigável
+                        'date' => $event->occurredAt->format('Y-m-d H:i:s'),
+                        'details' => match (class_basename($event)) {
+                            'TransferSent' => ['to' => $event->targetWalletId],
+                            'TransferReceived' => ['from' => $event->sourceWalletId],
+                            default => []
+                        },
+                    ];
                 },
-            ];
-        }, $history);
-
-        return $this->success($formattedHistory);
+                $this->repository->getHistory($user->wallet->id)
+            )
+        );
     }
 }

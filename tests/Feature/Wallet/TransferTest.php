@@ -63,7 +63,10 @@ describe('Wallet Transfer', function () {
         postJson('/api/wallet/transfer', [
             'target_email' => 'ghost@test.com',
             'amount' => 100,
-        ], ['Authorization' => "Bearer $token"])->assertStatus(422);
+        ], [
+            'Authorization' => "Bearer $token",
+            'Idempotency-Key' => 'error-test-key',
+        ])->assertStatus(422);
     });
 
     test('transfer triggers webhook notification to target user url', function () {
@@ -102,5 +105,24 @@ describe('Wallet Transfer', function () {
                    $request['event'] == 'transfer_received' &&
                    $request['amount'] == 500;
         });
+    });
+
+    test('it requires idempotency key for transfer', function () {
+        // Sender
+        $user = User::factory()->create();
+        Wallet::create(['user_id' => $user->id, 'balance' => 1000, 'version' => 1]);
+        $token = JWTAuth::fromUser($user);
+
+        // Receiver
+        $target = User::factory()->create(['email' => 'receiver-check@test.com']);
+
+        postJson('/api/wallet/transfer', [
+            'amount' => 100,
+            'target_email' => $target->email,
+        ], [
+            'Authorization' => "Bearer $token",
+            // Header omitido
+        ])->assertStatus(400)
+            ->assertJsonFragment(['message' => 'Header "Idempotency-Key" is required for state-changing operations.']);
     });
 });

@@ -2,13 +2,12 @@
 
 namespace App\Repositories;
 
-use App\Infrastructure\Serializer\EventSerializer; // Importar
+use App\Infrastructure\Serializer\EventSerializer;
 use App\Models\StoredEvent;
 use App\Models\Wallet;
 
 class WalletRepository
 {
-    // Injetamos o Serializer
     public function __construct(
         protected EventSerializer $serializer
     ) {}
@@ -21,8 +20,7 @@ class WalletRepository
             ->get()
             ->map(function ($row) {
                 $payload = $row->payload;
-                // Hack de consistência: Garantimos que a data usada seja a do banco (Source of Truth)
-                // caso o payload json tenha ficado desatualizado por alguma migração manual.
+                // Garante que a data usada seja a do banco (Source of Truth)
                 $payload['occurredAt'] = $row->occurred_at->format(\DateTimeImmutable::ATOM);
 
                 return $this->serializer->deserialize($row->event_class, $payload);

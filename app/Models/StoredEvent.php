@@ -9,7 +9,7 @@ class StoredEvent extends Model
 {
     use HasUlids;
 
-    public $timestamps = false; // Controlamos 'occurred_at' manualmente no domínio
+    public $timestamps = false;
 
     protected $fillable = [
         'aggregate_id',

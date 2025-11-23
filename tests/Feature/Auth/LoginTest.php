@@ -2,6 +2,7 @@
 
 use App\Models\User;
 use Illuminate\Support\Facades\Hash;
+
 use function Pest\Laravel\postJson;
 
 uses(\Illuminate\Foundation\Testing\RefreshDatabase::class);
@@ -23,10 +24,10 @@ describe('Auth Login', function () {
 
         // 3. Validar
         $response->assertStatus(200)
-                 ->assertJsonStructure([
-                     'status',
-                     'data' => ['token', 'type', 'expires_in']
-                 ]);
+            ->assertJsonStructure([
+                'status',
+                'data' => ['token', 'type', 'expires_in'],
+            ]);
     });
 
     test('user cannot login with incorrect password', function () {
@@ -39,7 +40,7 @@ describe('Auth Login', function () {
             'email' => 'wrong@test.com',
             'password' => 'wrong-password',
         ])->assertStatus(401)
-          ->assertJsonFragment(['message' => 'Unauthorized']);
+            ->assertJsonFragment(['message' => 'Unauthorized']);
     });
 
     test('user cannot login with non-existent email', function () {

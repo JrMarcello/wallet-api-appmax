@@ -1,10 +1,11 @@
 <?php
 
 use App\Models\User;
-use PHPOpenSourceSaver\JWTAuth\Facades\JWTAuth;
 use Illuminate\Support\Facades\Auth;
-use function Pest\Laravel\postJson;
+use PHPOpenSourceSaver\JWTAuth\Facades\JWTAuth;
+
 use function Pest\Laravel\getJson;
+use function Pest\Laravel\postJson;
 
 uses(\Illuminate\Foundation\Testing\RefreshDatabase::class);
 

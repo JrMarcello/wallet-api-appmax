@@ -2,7 +2,6 @@
 
 namespace App\Models;
 
-// Importações Cruciais
 use Illuminate\Database\Eloquent\Concerns\HasUlids;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Foundation\Auth\User as Authenticatable;
@@ -42,7 +41,6 @@ class User extends Authenticatable implements JWTSubject
         'password' => 'hashed',
     ];
 
-    // --- Métodos do JWT ---
     public function getJWTIdentifier()
     {
         return $this->getKey();
@@ -53,7 +51,6 @@ class User extends Authenticatable implements JWTSubject
         return [];
     }
 
-    // --- Relações ---
     public function wallet()
     {
         return $this->hasOne(Wallet::class);

@@ -22,25 +22,9 @@ class WalletAggregate
     }
 
     /**
-     * Reconstrói o estado atual ("Replay") baseando-se no histórico.
-     *
-     * @param  array  $historyEvents  Lista de objetos de evento (DTOs)
-     */
-    public static function retrieve(string $id, array $historyEvents): self
-    {
-        $aggregate = new self($id);
-
-        foreach ($historyEvents as $event) {
-            $aggregate->apply($event);
-        }
-
-        return $aggregate;
-    }
-
-    /**
      * APLICA o evento no estado interno (Mutação matemática)
      */
-    private function apply(object $event): void
+    private function apply(object $event): object
     {
         if ($event instanceof FundsDeposited) {
             $this->balance += $event->amount;
@@ -57,6 +41,24 @@ class WalletAggregate
         if ($event instanceof TransferSent) {
             $this->balance -= $event->amount;
         }
+
+        return $event;
+    }
+
+    /**
+     * Reconstrói o estado atual ("Replay") baseando-se no histórico.
+     *
+     * @param  array  $historyEvents  Lista de objetos de evento (DTOs)
+     */
+    public static function retrieve(string $id, array $historyEvents): self
+    {
+        $aggregate = new self($id);
+
+        foreach ($historyEvents as $event) {
+            $aggregate->apply($event);
+        }
+
+        return $aggregate;
     }
 
     /**
@@ -68,17 +70,14 @@ class WalletAggregate
             throw new InvalidArgumentException('O valor do depósito deve ser positivo.');
         }
 
-        // Regra: Depósito sempre aceito (sem limite no case básico)
-        $event = new FundsDeposited(
-            $this->id,
-            $amount,
-            new DateTimeImmutable
+        return $this->apply(
+            new FundsDeposited(
+                $this->id,
+                $amount,
+                new DateTimeImmutable
+            )
         );
 
-        // Opcional: Já aplica no state atual caso a gente fosse continuar usando a instância
-        $this->apply($event);
-
-        return $event;
     }
 
     public function withdraw(int $amount): FundsWithdrawn
@@ -91,15 +90,13 @@ class WalletAggregate
             throw new InsufficientFundsException;
         }
 
-        $event = new FundsWithdrawn(
-            $this->id,
-            $amount,
-            new DateTimeImmutable
+        return $this->apply(
+            new FundsWithdrawn(
+                $this->id,
+                $amount,
+                new DateTimeImmutable
+            )
         );
-
-        $this->apply($event);
-
-        return $event;
     }
 
     public function sendTransfer(string $targetWalletId, int $amount): TransferSent
@@ -111,30 +108,26 @@ class WalletAggregate
             throw new InsufficientFundsException;
         }
 
-        $event = new TransferSent(
-            $this->id,
-            $targetWalletId,
-            $amount,
-            new DateTimeImmutable
+        return $this->apply(
+            new TransferSent(
+                $this->id,
+                $targetWalletId,
+                $amount,
+                new DateTimeImmutable
+            )
         );
-
-        $this->apply($event);
-
-        return $event;
     }
 
     public function receiveTransfer(string $sourceWalletId, int $amount): TransferReceived
     {
-        // Recebimento passivo. Não valida saldo, apenas aceita.
-        $event = new TransferReceived(
-            $this->id,
-            $sourceWalletId,
-            $amount,
-            new DateTimeImmutable
+        return $this->apply(
+            new TransferReceived(
+                $this->id,
+                $sourceWalletId,
+                $amount,
+                new DateTimeImmutable
+            )
         );
-        $this->apply($event);
-
-        return $event;
     }
 
     public function getBalance(): int

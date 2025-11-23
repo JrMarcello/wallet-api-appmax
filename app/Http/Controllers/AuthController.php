@@ -36,7 +36,7 @@ class AuthController extends Controller
         return $this->success([
             'token' => $token,
             'type' => 'bearer',
-            'expires_in' => $this->guard()->factory()->getTTL() * 60,
+            'expires_in' => config('jwt.ttl') * 60,
         ]);
     }
 
@@ -62,7 +62,7 @@ class AuthController extends Controller
                 'user' => $user,
                 'token' => $token,
                 'type' => 'bearer',
-                'expires_in' => $this->guard()->factory()->getTTL() * 60,
+                'expires_in' => config('jwt.ttl') * 60,
             ], 'User created successfully', 201);
         });
     }
@@ -80,7 +80,10 @@ class AuthController extends Controller
 
     public function refresh(): JsonResponse
     {
-        return $this->respondWithToken($this->guard()->refresh());
+        /** @var \PHPOpenSourceSaver\JWTAuth\JWTGuard $guard */
+        $guard = $this->guard();
+
+        return $this->respondWithToken($guard->refresh());
     }
 
     public function logout(): JsonResponse
@@ -98,9 +101,6 @@ class AuthController extends Controller
         return $this->success($user->load('wallet'));
     }
 
-    /**
-     * Atualiza a URL de Webhook do usuário autenticado
-     */
     public function updateWebhook(UpdateWebhookRequest $request): JsonResponse
     {
         /** @var User $user */

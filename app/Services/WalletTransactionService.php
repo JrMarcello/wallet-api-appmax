@@ -118,7 +118,7 @@ class WalletTransactionService
 
         try {
             return $this->db->transaction(function () use ($payerUserId, $payeeUserId, $amount, $ctx) {
-                // 1. Lock Strategy
+                // Lock Strategy
                 $payerWalletId = Wallet::where('user_id', $payerUserId)->value('id');
                 $payeeWalletId = Wallet::where('user_id', $payeeUserId)->value('id');
 
@@ -129,30 +129,29 @@ class WalletTransactionService
                 $idsToLock = [$payerWalletId, $payeeWalletId];
                 sort($idsToLock);
 
-                // LOG CRÍTICO: Mostra a ordem do Lock. Vital para debugar Deadlocks.
+                // Mostra a ordem do Lock. Vital para debugar Deadlocks.
                 Log::debug('P2P Transfer: Acquiring Locks', ['sorted_lock_ids' => $idsToLock]);
 
                 $lockedWallets = Wallet::whereIn('id', $idsToLock)->lockForUpdate()->get();
 
-                // 2. Replay
+                // Replay
                 $payerHistory = $this->repository->getHistory($payerWalletId);
                 $payerAggregate = WalletAggregate::retrieve($payerWalletId, $payerHistory);
 
                 $payeeHistory = $this->repository->getHistory($payeeWalletId);
                 $payeeAggregate = WalletAggregate::retrieve($payeeWalletId, $payeeHistory);
 
-                // 3. Domain Logic
                 $eventSent = $payerAggregate->sendTransfer($payeeWalletId, $amount);
                 $eventReceived = $payeeAggregate->receiveTransfer($payerWalletId, $amount);
 
-                // 4. Persistência
+                // Persistência
                 $this->repository->append($eventSent);
                 $this->repository->updateProjection($payerWalletId, $payerAggregate->getBalance());
 
                 $this->repository->append($eventReceived);
                 $this->repository->updateProjection($payeeWalletId, $payeeAggregate->getBalance());
 
-                // 5. Webhook
+                // Webhook
                 Log::info('P2P Transfer: Dispatching Webhook Job', ['payee_user_id' => $payeeUserId]);
                 \App\Jobs\SendTransactionNotification::dispatch($payeeUserId, $amount);
 

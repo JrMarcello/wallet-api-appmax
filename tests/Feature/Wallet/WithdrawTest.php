@@ -37,8 +37,10 @@ describe('Wallet Withdraw', function () {
         Wallet::create(['user_id' => $user->id, 'balance' => 0, 'version' => 1]);
         $token = JWTAuth::fromUser($user);
 
-        postJson('/api/wallet/withdraw', ['amount' => 500], ['Authorization' => "Bearer $token"])
-            ->assertStatus(400)
+        postJson('/api/wallet/withdraw', ['amount' => 500], [
+            'Authorization' => "Bearer $token",
+            'Idempotency-Key' => 'domain-rule-check',
+        ])->assertStatus(400)
             ->assertJsonFragment(['status' => 'error']);
     });
 
@@ -63,5 +65,18 @@ describe('Wallet Withdraw', function () {
             ->assertHeader('X-Idempotency-Hit', 'true');
 
         assertDatabaseHas('wallets', ['user_id' => $user->id, 'balance' => 0]);
+    });
+
+    test('it requires idempotency key for withdrawal', function () {
+        $user = User::factory()->create();
+        // Criamos saldo suficiente para garantir que o erro não seja de saldo, mas sim do header
+        Wallet::create(['user_id' => $user->id, 'balance' => 1000, 'version' => 1]);
+        $token = JWTAuth::fromUser($user);
+
+        postJson('/api/wallet/withdraw', ['amount' => 100], [
+            'Authorization' => "Bearer $token",
+            // Header omitido
+        ])->assertStatus(400)
+            ->assertJsonFragment(['message' => 'Header "Idempotency-Key" is required for state-changing operations.']);
     });
 });

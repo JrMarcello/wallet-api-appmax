@@ -16,31 +16,30 @@ class CheckIdempotency
      */
     public function handle(Request $request, Closure $next): Response
     {
-        if (! $request->isMethod('POST') && ! $request->isMethod('PUT') && ! $request->isMethod('PATCH')) {
+        // Ignora métodos de leitura (GET, HEAD, OPTIONS)
+        if ($request->isMethodSafe()) {
             return $next($request);
         }
 
-        // Check Header Idempotency-Key
-        // Idempotencia é opcional, então só age se o header estiver presente
         $key = $request->header('Idempotency-Key');
-        if (! $key) {
-            return $next($request);
+        if (empty($key)) {
+            return response()->json([
+                'status' => 'error',
+                'message' => 'Header "Idempotency-Key" is required for state-changing operations.',
+            ], 400);
         }
 
         $user = auth('api')->user();
         $userId = $user ? $user->id : 'guest';
         $cacheKey = "idempotency_{$userId}_{$key}";
-
         $ctx = ['key' => $key, 'user_id' => $userId, 'method' => $request->method()];
 
         if (Cache::has($cacheKey)) {
             Log::info('Idempotency: HIT (Redis)', $ctx);
             $cachedResponse = Cache::get($cacheKey);
 
-            return response()->json(
-                $cachedResponse['content'],
-                $cachedResponse['status']
-            )->header('X-Idempotency-Hit', 'true');
+            return response()->json($cachedResponse['content'], $cachedResponse['status'])
+                ->header('X-Idempotency-Hit', 'true');
         }
 
         Log::debug('Idempotency: MISS (Processing)', $ctx);
@@ -48,27 +47,22 @@ class CheckIdempotency
         $response = $next($request);
         if ($response->isSuccessful()) {
             Log::debug('Idempotency: STORE', $ctx);
-
-            // Pegamos o conteúdo cru para salvar string no banco e array no Redis
             $rawContent = $response->getContent();
             $contentArray = json_decode($rawContent, true);
 
-            // Salvar no Redis (Rápido, TTL curto de 24h)
             Cache::put($cacheKey, [
                 'status' => $response->getStatusCode(),
                 'content' => $contentArray,
             ], now()->addDay());
 
-            // Salvar no MySQL (Auditoria, Persistente)
-            // try/catch para não bloquear a resposta ao cliente
             try {
                 DB::table('idempotency_keys')->insertOrIgnore([
                     'key' => $key,
-                    'user_id' => $user ? $user->id : null, // Nullable no banco
-                    'response_json' => $rawContent, // Salva o JSON exato retornado
+                    'user_id' => $user ? $user->id : null,
+                    'response_json' => $rawContent,
                     'status_code' => $response->getStatusCode(),
                     'created_at' => now(),
-                    'expires_at' => now()->addDay(), // Mantemos a semântica de expiração
+                    'expires_at' => now()->addDay(),
                 ]);
             } catch (\Exception $e) {
                 Log::error('Idempotency: DB Persist Failed - '.$e->getMessage(), $ctx);

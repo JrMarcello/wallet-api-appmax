@@ -1,21 +1,21 @@
 {
 	"_type": "export",
 	"__export_format": 4,
-	"__export_date": "2025-11-22T18:00:00.000Z",
+	"__export_date": "2025-11-23T15:00:00.000Z",
 	"__export_source": "insomnia.desktop.app:v2023.5.0",
 	"resources": [
 		{
 			"_id": "req_register_a",
 			"parentId": "fld_auth",
-			"modified": 1700000000000,
+			"modified": 1700000000001,
 			"created": 1700000000000,
 			"url": "{{ _.base_url }}/auth/register",
-			"name": "1. Register User A (Origem)",
-			"description": "",
+			"name": "1. Register User A (Sender)",
+			"description": "Cria usuário com webhook configurado",
 			"method": "POST",
 			"body": {
 				"mimeType": "application/json",
-				"text": "{\n\t\"name\": \"User A\",\n\t\"email\": \"user.a@example.com\",\n\t\"password\": \"password123\"\n}"
+				"text": "{\n\t\"name\": \"User A\",\n\t\"email\": \"user.a@example.com\",\n\t\"password\": \"password123\",\n\t\"webhook_url\": \"https://httpbin.org/post\"\n}"
 			},
 			"parameters": [],
 			"headers": [
@@ -42,15 +42,15 @@
 		{
 			"_id": "req_register_b",
 			"parentId": "fld_auth",
-			"modified": 1700000000000,
+			"modified": 1700000000001,
 			"created": 1700000000000,
 			"url": "{{ _.base_url }}/auth/register",
-			"name": "2. Register User B (Destino)",
-			"description": "",
+			"name": "2. Register User B (Receiver)",
+			"description": "Cria usuário destino",
 			"method": "POST",
 			"body": {
 				"mimeType": "application/json",
-				"text": "{\n\t\"name\": \"User B\",\n\t\"email\": \"user.b@example.com\",\n\t\"password\": \"password123\"\n}"
+				"text": "{\n\t\"name\": \"User B\",\n\t\"email\": \"user.b@example.com\",\n\t\"password\": \"password123\",\n\t\"webhook_url\": \"https://httpbin.org/post\"\n}"
 			},
 			"parameters": [],
 			"headers": [
@@ -75,7 +75,7 @@
 			"created": 1700000000000,
 			"url": "{{ _.base_url }}/auth/login",
 			"name": "3. Login (Pegar Token)",
-			"description": "Copie o token da resposta e coloque na variável de ambiente 'access_token'",
+			"description": "Copie o token e atualize a variável de ambiente",
 			"method": "POST",
 			"body": {
 				"mimeType": "application/json",
@@ -103,7 +103,7 @@
 			"modified": 1700000000000,
 			"created": 1700000000000,
 			"url": "{{ _.base_url }}/auth/me",
-			"name": "4. Get Me (Check Token)",
+			"name": "4. Get Me",
 			"description": "",
 			"method": "GET",
 			"body": {},
@@ -123,13 +123,45 @@
 			"_type": "request"
 		},
 		{
+			"_id": "req_update_webhook",
+			"parentId": "fld_auth",
+			"modified": 1700000000002,
+			"created": 1700000000002,
+			"url": "{{ _.base_url }}/auth/webhook",
+			"name": "5. Configure Webhook",
+			"description": "",
+			"method": "POST",
+			"body": {
+				"mimeType": "application/json",
+				"text": "{\n\t\"url\": \"https://httpbin.org/post\"\n}"
+			},
+			"parameters": [],
+			"headers": [
+				{
+					"name": "Content-Type",
+					"value": "application/json"
+				},
+				{
+					"name": "Accept",
+					"value": "application/json"
+				}
+			],
+			"authentication": {
+				"type": "bearer",
+				"token": "{{ _.access_token }}"
+			},
+			"metaSortKey": -60,
+			"isPrivate": false,
+			"_type": "request"
+		},
+		{
 			"_id": "req_deposit",
 			"parentId": "fld_wallet",
 			"modified": 1700000000000,
 			"created": 1700000000000,
 			"url": "{{ _.base_url }}/wallet/deposit",
 			"name": "1. Deposit Funds",
-			"description": "Adiciona saldo (R$ 100,00)",
+			"description": "Requer Idempotency Key",
 			"method": "POST",
 			"body": {
 				"mimeType": "application/json",
@@ -148,7 +180,7 @@
 				{
 					"name": "Idempotency-Key",
 					"value": "{% uuid 'v4' %}",
-					"description": "Gera UUID auto a cada request"
+					"description": "Auto Generated UUID"
 				}
 			],
 			"authentication": {
@@ -166,7 +198,7 @@
 			"created": 1700000000000,
 			"url": "{{ _.base_url }}/wallet/transfer",
 			"name": "2. Transfer P2P",
-			"description": "Transfere R$ 50,00 para User B",
+			"description": "",
 			"method": "POST",
 			"body": {
 				"mimeType": "application/json",
@@ -202,7 +234,7 @@
 			"created": 1700000000000,
 			"url": "{{ _.base_url }}/wallet/withdraw",
 			"name": "3. Withdraw Funds",
-			"description": "Saca R$ 10,00",
+			"description": "",
 			"method": "POST",
 			"body": {
 				"mimeType": "application/json",
@@ -234,11 +266,11 @@
 		{
 			"_id": "req_balance",
 			"parentId": "fld_wallet",
-			"modified": 1700000000000,
+			"modified": 1700000000005,
 			"created": 1700000000000,
 			"url": "{{ _.base_url }}/wallet/balance",
 			"name": "4. Get Balance",
-			"description": "",
+			"description": "Leitura não exige Idempotency Key",
 			"method": "GET",
 			"body": {},
 			"parameters": [],
@@ -259,11 +291,11 @@
 		{
 			"_id": "req_transactions",
 			"parentId": "fld_wallet",
-			"modified": 1700000000000,
+			"modified": 1700000000005,
 			"created": 1700000000000,
 			"url": "{{ _.base_url }}/wallet/transactions",
-			"name": "5. Get Statement (Extrato)",
-			"description": "Event Replay",
+			"name": "5. Get Statement",
+			"description": "Leitura não exige Idempotency Key",
 			"method": "GET",
 			"body": {},
 			"parameters": [],
@@ -278,6 +310,39 @@
 				"token": "{{ _.access_token }}"
 			},
 			"metaSortKey": -60,
+			"isPrivate": false,
+			"_type": "request"
+		},
+		{
+			"_id": "req_error_no_key",
+			"parentId": "fld_wallet",
+			"modified": 1700000000006,
+			"created": 1700000000006,
+			"url": "{{ _.base_url }}/wallet/deposit",
+			"name": "6. Test Missing Idempotency (Error)",
+			"description": "Deve retornar 400 Bad Request",
+			"method": "POST",
+			"body": {
+				"mimeType": "application/json",
+				"text": "{\n\t\"amount\": 100\n}"
+			},
+			"parameters": [],
+			"headers": [
+				{
+					"name": "Content-Type",
+					"value": "application/json"
+				},
+				{
+					"name": "Accept",
+					"value": "application/json"
+				}
+				
+			],
+			"authentication": {
+				"type": "bearer",
+				"token": "{{ _.access_token }}"
+			},
+			"metaSortKey": -50,
 			"isPrivate": false,
 			"_type": "request"
 		},
@@ -307,7 +372,7 @@
 			"parentId": null,
 			"modified": 1700000000000,
 			"created": 1700000000000,
-			"name": "Wallet API (Staff Case)",
+			"name": "Wallet API (Staff Case) v2",
 			"description": "",
 			"scope": "collection",
 			"_type": "workspace"

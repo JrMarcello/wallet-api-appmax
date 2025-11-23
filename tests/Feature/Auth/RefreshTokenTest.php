@@ -1,10 +1,11 @@
 <?php
 
 use App\Models\User;
-use PHPOpenSourceSaver\JWTAuth\Facades\JWTAuth;
 use Illuminate\Support\Facades\Auth;
-use function Pest\Laravel\postJson;
+use PHPOpenSourceSaver\JWTAuth\Facades\JWTAuth;
+
 use function Pest\Laravel\getJson;
+use function Pest\Laravel\postJson;
 
 uses(\Illuminate\Foundation\Testing\RefreshDatabase::class);
 
@@ -22,7 +23,7 @@ describe('Auth Refresh Token', function () {
         // 3. Refresh (Gera novo token)
         $response = postJson('/api/auth/refresh', [], ['Authorization' => "Bearer $token"]);
         $response->assertStatus(200);
-        
+
         $newToken = $response->json('data.token');
 
         // 4. Limpar estado
@@ -31,7 +32,7 @@ describe('Auth Refresh Token', function () {
 
         // 5. Verificar Token Antigo (Blacklist -> 401)
         getJson('/api/auth/me', ['Authorization' => "Bearer $token"])
-            ->assertStatus(401); 
+            ->assertStatus(401);
 
         // 6. Limpar estado de novo
         // Auth::forgetGuards();

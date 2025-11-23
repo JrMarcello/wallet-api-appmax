@@ -3,6 +3,7 @@
 use Illuminate\Foundation\Application;
 use Illuminate\Foundation\Configuration\Exceptions;
 use Illuminate\Foundation\Configuration\Middleware;
+use Illuminate\Support\Facades\Log;
 
 return Application::configure(basePath: dirname(__DIR__))
     ->withRouting(
@@ -14,7 +15,7 @@ return Application::configure(basePath: dirname(__DIR__))
     ->withMiddleware(function (Middleware $middleware) {
         // Registra para todas as rotas da API
         $middleware->api(prepend: [
-            \App\Http\Middleware\CheckIdempotency::class,
+            // ...
         ]);
     })
     ->withExceptions(function (Exceptions $exceptions): void {
