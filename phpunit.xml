@@ -37,5 +37,7 @@
         <env name="DB_DATABASE" value="wallet_test"/>
         <env name="DB_USERNAME" value="walletuser"/>
         <env name="DB_PASSWORD" value="root"/>
+
+        <env name="JWT_TTL" value="1"/> <!-- Expira em 1 minuto nos testes -->
     </php>
 </phpunit>
