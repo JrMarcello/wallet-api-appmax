@@ -6,5 +6,5 @@ use Exception;
 
 class InsufficientFundsException extends Exception
 {
-    protected $message = "Saldo insuficiente para realizar a operação.";
+    protected $message = 'Saldo insuficiente para realizar a operação.';
 }

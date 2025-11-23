@@ -35,16 +35,16 @@ class EventSerializer
      */
     public function deserialize(string $eventClass, array $payload): object
     {
-        if (!class_exists($eventClass)) {
+        if (! class_exists($eventClass)) {
             throw new \RuntimeException("Event class '$eventClass' not found.");
         }
 
         // Reflection para inspecionar os tipos do construtor
         $reflection = new ReflectionClass($eventClass);
         $constructor = $reflection->getConstructor();
-        
-        if (!$constructor) {
-            return new $eventClass();
+
+        if (! $constructor) {
+            return new $eventClass;
         }
 
         $args = [];
@@ -54,15 +54,15 @@ class EventSerializer
             $type = $param->getType();
 
             // Se o payload não tem esse dado, pulamos (ou erro)
-            if (!isset($payload[$name])) {
-                continue; 
+            if (! isset($payload[$name])) {
+                continue;
             }
 
             $value = $payload[$name];
 
             // Auto-casting para DateTime se o construtor pedir
-            if ($type instanceof ReflectionNamedType && 
-                is_subclass_of($type->getName(), \DateTimeInterface::class) && 
+            if ($type instanceof ReflectionNamedType &&
+                is_subclass_of($type->getName(), \DateTimeInterface::class) &&
                 is_string($value)) {
                 $value = new DateTimeImmutable($value);
             }

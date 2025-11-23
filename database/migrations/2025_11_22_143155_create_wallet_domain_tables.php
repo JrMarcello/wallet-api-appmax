@@ -27,19 +27,19 @@ return new class extends Migration
             $table->json('payload');
             $table->unsignedBigInteger('aggregate_version')->nullable();
             // Timestamp crítico para ordenação
-            $table->timestamp('occurred_at', precision: 6); 
+            $table->timestamp('occurred_at', precision: 6);
             $table->timestamp('created_at')->useCurrent();
-            
+
             // Índice composto para garantir que recuperar o histórico seja O(1)
             $table->index(['aggregate_id', 'occurred_at']);
         });
-        
+
         // Tabela para persistir Chaves de Idempotência (para auditoria)
         Schema::create('idempotency_keys', function (Blueprint $table) {
             $table->string('key')->primary();
             $table->ulid('user_id')->index()->nullable();
             $table->text('response_json');
-            $table->integer('status_code'); 
+            $table->integer('status_code');
             $table->timestamp('created_at')->useCurrent();
             $table->timestamp('expires_at')->nullable();
         });

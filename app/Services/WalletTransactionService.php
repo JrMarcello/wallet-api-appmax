@@ -5,9 +5,9 @@ namespace App\Services;
 use App\Domain\Wallet\WalletAggregate;
 use App\Models\Wallet;
 use App\Repositories\WalletRepository;
+use Exception;
 use Illuminate\Database\DatabaseManager;
 use Illuminate\Support\Facades\Log;
-use Exception;
 
 class WalletTransactionService
 {
@@ -22,7 +22,7 @@ class WalletTransactionService
     public function deposit(string $userId, int $amount): array
     {
         $ctx = ['user_id' => $userId, 'amount' => $amount, 'operation' => 'deposit'];
-        Log::info("Wallet Deposit: Start", $ctx);
+        Log::info('Wallet Deposit: Start', $ctx);
 
         try {
             return $this->db->transaction(function () use ($userId, $amount, $ctx) {
@@ -39,18 +39,18 @@ class WalletTransactionService
                 $this->repository->append($newEvent);
                 $this->repository->updateProjection($walletId, $aggregate->getBalance());
 
-                Log::info("Wallet Deposit: Success", array_merge($ctx, [
-                    'new_balance' => $aggregate->getBalance()
+                Log::info('Wallet Deposit: Success', array_merge($ctx, [
+                    'new_balance' => $aggregate->getBalance(),
                 ]));
 
                 return [
                     'wallet_id' => $walletId,
                     'new_balance' => $aggregate->getBalance(),
-                    'transaction_id' => $walletId
+                    'transaction_id' => $walletId,
                 ];
             });
         } catch (Exception $e) {
-            Log::error("Wallet Deposit: Failed - " . $e->getMessage(), $ctx);
+            Log::error('Wallet Deposit: Failed - '.$e->getMessage(), $ctx);
             throw $e;
         }
     }
@@ -61,7 +61,7 @@ class WalletTransactionService
     public function withdraw(string $userId, int $amount): array
     {
         $ctx = ['user_id' => $userId, 'amount' => $amount, 'operation' => 'withdraw'];
-        Log::info("Wallet Withdraw: Start", $ctx);
+        Log::info('Wallet Withdraw: Start', $ctx);
 
         try {
             return $this->db->transaction(function () use ($userId, $amount, $ctx) {
@@ -77,22 +77,22 @@ class WalletTransactionService
                 $this->repository->append($newEvent);
                 $this->repository->updateProjection($walletId, $aggregate->getBalance());
 
-                Log::info("Wallet Withdraw: Success", array_merge($ctx, [
-                    'new_balance' => $aggregate->getBalance()
+                Log::info('Wallet Withdraw: Success', array_merge($ctx, [
+                    'new_balance' => $aggregate->getBalance(),
                 ]));
 
                 return [
                     'wallet_id' => $walletId,
-                    'new_balance' => $aggregate->getBalance()
+                    'new_balance' => $aggregate->getBalance(),
                 ];
             });
         } catch (Exception $e) {
-            Log::error("Wallet Withdraw: Failed - " . $e->getMessage(), $ctx);
+            Log::error('Wallet Withdraw: Failed - '.$e->getMessage(), $ctx);
             throw $e;
         }
     }
-    
-    public function getBalance(string $userId): int 
+
+    public function getBalance(string $userId): int
     {
         return Wallet::where('user_id', $userId)->value('balance') ?? 0;
     }
@@ -106,14 +106,14 @@ class WalletTransactionService
             'payer_user_id' => $payerUserId,
             'payee_user_id' => $payeeUserId,
             'amount' => $amount,
-            'operation' => 'transfer_p2p'
+            'operation' => 'transfer_p2p',
         ];
 
-        Log::info("P2P Transfer: Start", $ctx);
+        Log::info('P2P Transfer: Start', $ctx);
 
         if ($payerUserId === $payeeUserId) {
-            Log::warning("P2P Transfer: Blocked (Self Transfer)", $ctx);
-            throw new \InvalidArgumentException("Cannot transfer to self");
+            Log::warning('P2P Transfer: Blocked (Self Transfer)', $ctx);
+            throw new \InvalidArgumentException('Cannot transfer to self');
         }
 
         try {
@@ -122,16 +122,16 @@ class WalletTransactionService
                 $payerWalletId = Wallet::where('user_id', $payerUserId)->value('id');
                 $payeeWalletId = Wallet::where('user_id', $payeeUserId)->value('id');
 
-                if (!$payerWalletId || !$payeeWalletId) {
-                    throw new \Exception("One or both users do not have a wallet configured.");
+                if (! $payerWalletId || ! $payeeWalletId) {
+                    throw new \Exception('One or both users do not have a wallet configured.');
                 }
 
                 $idsToLock = [$payerWalletId, $payeeWalletId];
                 sort($idsToLock);
 
                 // LOG CRÍTICO: Mostra a ordem do Lock. Vital para debugar Deadlocks.
-                Log::debug("P2P Transfer: Acquiring Locks", ['sorted_lock_ids' => $idsToLock]);
-                
+                Log::debug('P2P Transfer: Acquiring Locks', ['sorted_lock_ids' => $idsToLock]);
+
                 $lockedWallets = Wallet::whereIn('id', $idsToLock)->lockForUpdate()->get();
 
                 // 2. Replay
@@ -151,25 +151,25 @@ class WalletTransactionService
 
                 $this->repository->append($eventReceived);
                 $this->repository->updateProjection($payeeWalletId, $payeeAggregate->getBalance());
-                
+
                 // 5. Webhook
-                Log::info("P2P Transfer: Dispatching Webhook Job", ['payee_user_id' => $payeeUserId]);
+                Log::info('P2P Transfer: Dispatching Webhook Job', ['payee_user_id' => $payeeUserId]);
                 \App\Jobs\SendTransactionNotification::dispatch($payeeUserId, $amount);
 
-                Log::info("P2P Transfer: Success", array_merge($ctx, [
+                Log::info('P2P Transfer: Success', array_merge($ctx, [
                     'payer_wallet_id' => $payerWalletId,
                     'payee_wallet_id' => $payeeWalletId,
-                    'final_payer_balance' => $payerAggregate->getBalance()
+                    'final_payer_balance' => $payerAggregate->getBalance(),
                 ]));
 
                 return [
-                    'transaction_id' => $payerWalletId . '-' . time(),
+                    'transaction_id' => $payerWalletId.'-'.time(),
                     'payer_balance' => $payerAggregate->getBalance(),
-                    'payee_id' => $payeeUserId
+                    'payee_id' => $payeeUserId,
                 ];
             });
         } catch (Exception $e) {
-            Log::error("P2P Transfer: Failed - " . $e->getMessage(), $ctx);
+            Log::error('P2P Transfer: Failed - '.$e->getMessage(), $ctx);
             throw $e;
         }
     }

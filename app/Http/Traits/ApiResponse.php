@@ -8,11 +8,10 @@ use Symfony\Component\HttpFoundation\Response;
 trait ApiResponse
 {
     protected function success(
-        mixed $data = null, 
-        string $message = 'Success', 
+        mixed $data = null,
+        string $message = 'Success',
         int $code = Response::HTTP_OK
-    ): JsonResponse
-    {
+    ): JsonResponse {
         return response()->json([
             'status' => 'success',
             'message' => $message,
@@ -24,8 +23,7 @@ trait ApiResponse
         string $message,
         int $code = Response::HTTP_BAD_REQUEST,
         array $errors = []
-    ): JsonResponse
-    {
+    ): JsonResponse {
         return response()->json([
             'status' => 'error',
             'message' => $message,

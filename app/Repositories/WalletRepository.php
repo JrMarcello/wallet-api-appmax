@@ -36,9 +36,9 @@ class WalletRepository
 
         StoredEvent::create([
             'aggregate_id' => $event->walletId,
-            'event_class'  => get_class($event),
-            'payload'      => $payload,
-            'occurred_at'  => $event->occurredAt,
+            'event_class' => get_class($event),
+            'payload' => $payload,
+            'occurred_at' => $event->occurredAt,
         ]);
     }
 

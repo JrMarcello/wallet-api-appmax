@@ -9,11 +9,20 @@ use Illuminate\Foundation\Auth\User as Authenticatable;
 use Illuminate\Notifications\Notifiable;
 use PHPOpenSourceSaver\JWTAuth\Contracts\JWTSubject;
 
+/**
+ * @property string $id
+ * @property string $name
+ * @property string $email
+ * @property string $password
+ * @property string|null $webhook_url
+ * @property \App\Models\Wallet|null $wallet
+ */
 class User extends Authenticatable implements JWTSubject
 {
-    use HasFactory, Notifiable, HasUlids;
+    use HasFactory, HasUlids, Notifiable;
 
     public $incrementing = false;
+
     protected $keyType = 'string';
 
     protected $fillable = [

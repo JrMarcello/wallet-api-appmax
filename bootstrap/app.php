@@ -20,7 +20,7 @@ return Application::configure(basePath: dirname(__DIR__))
     ->withExceptions(function (Exceptions $exceptions): void {
         // Captura qualquer erro 500 não tratado
         $exceptions->reportable(function (Throwable $e) {
-            Log::error("Global Exception Handler", [
+            Log::error('Global Exception Handler', [
                 'message' => $e->getMessage(),
                 'file' => $e->getFile(),
                 'line' => $e->getLine(),

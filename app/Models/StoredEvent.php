@@ -17,7 +17,7 @@ class StoredEvent extends Model
         'payload',
         'aggregate_version',
         'occurred_at',
-        'created_at'
+        'created_at',
     ];
 
     protected $casts = [

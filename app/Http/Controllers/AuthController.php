@@ -9,9 +9,9 @@ use App\Http\Traits\ApiResponse;
 use App\Models\User;
 use App\Models\Wallet;
 use Illuminate\Http\JsonResponse;
+use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
-use Illuminate\Support\Facades\Auth;
 
 class AuthController extends Controller
 {
@@ -19,11 +19,12 @@ class AuthController extends Controller
 
     /**
      * Helper para tipar corretamente o Guard JWT
-     * 
+     *
      * @return \PHPOpenSourceSaver\JWTAuth\JWTGuard
      */
     private function guard()
     {
+        /** @var \PHPOpenSourceSaver\JWTAuth\JWTGuard */
         return Auth::guard('api');
     }
 
@@ -35,7 +36,7 @@ class AuthController extends Controller
         return $this->success([
             'token' => $token,
             'type' => 'bearer',
-            'expires_in' => $this->guard()->factory()->getTTL() * 60
+            'expires_in' => $this->guard()->factory()->getTTL() * 60,
         ]);
     }
 
@@ -52,7 +53,7 @@ class AuthController extends Controller
             Wallet::create([
                 'user_id' => $user->id,
                 'balance' => 0,
-                'version' => 1
+                'version' => 1,
             ]);
 
             $token = $this->guard()->login($user);
@@ -61,7 +62,7 @@ class AuthController extends Controller
                 'user' => $user,
                 'token' => $token,
                 'type' => 'bearer',
-                'expires_in' => $this->guard()->factory()->getTTL() * 60
+                'expires_in' => $this->guard()->factory()->getTTL() * 60,
             ], 'User created successfully', 201);
         });
     }
@@ -76,23 +77,25 @@ class AuthController extends Controller
 
         return $this->respondWithToken($token);
     }
-    
+
     public function refresh(): JsonResponse
     {
         return $this->respondWithToken($this->guard()->refresh());
+    }
+
+    public function logout(): JsonResponse
+    {
+        $this->guard()->logout();
+
+        return $this->success(null, 'Successfully logged out');
     }
 
     public function me(): JsonResponse
     {
         /** @var User $user */
         $user = $this->guard()->user();
-        return $this->success($user?->load('wallet'));
-    }
 
-    public function logout(): JsonResponse
-    {
-        $this->guard()->logout();
-        return $this->success(null, 'Successfully logged out');
+        return $this->success($user->load('wallet'));
     }
 
     /**
@@ -102,13 +105,13 @@ class AuthController extends Controller
     {
         /** @var User $user */
         $user = $this->guard()->user();
-        
+
         $user->update([
-            'webhook_url' => $request->url
+            'webhook_url' => $request->url,
         ]);
 
         return $this->success(
-            ['webhook_url' => $user->webhook_url], 
+            ['webhook_url' => $user->webhook_url],
             'Webhook configuration updated successfully'
         );
     }

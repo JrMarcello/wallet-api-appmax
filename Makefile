@@ -67,3 +67,24 @@ race:
 	@echo "🏎️  Preparando pista de corrida (Race Condition Test)..."
 	@chmod +x tests/race_test.sh
 	@./tests/race_test.sh
+
+# --- Quality Assurance ---
+
+# Formata o código automaticamente (Laravel Pint)
+lint:
+	@echo "🎨 Formatando código com Pint..."
+	docker-compose exec app ./vendor/bin/pint
+
+# Apenas verifica formatação (para CI)
+lint-check:
+	@echo "🎨 Verificando estilo de código..."
+	docker-compose exec app ./vendor/bin/pint --test
+
+# Roda análise estática (PHPStan)
+analyse:
+	@echo "🔍 Rodando análise estática (PHPStan)..."
+	docker-compose exec app ./vendor/bin/phpstan analyse --memory-limit=2G
+
+# Roda tudo (Testes + Lint + Análise) - O comando "Antes do Push"
+check: lint analyse test
+	@echo "✅ Tudo certo! Pode commitar."
