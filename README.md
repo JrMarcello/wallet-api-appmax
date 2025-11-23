@@ -1,6 +1,6 @@
 # Wallet API (Staff Engineer Case)
 
-![CI/CD](https://github.com/JrMarcello/wallet-api-appmax/actions/workflows/ci-cd.yml/badge.svg)
+![CI/CD](https://github.com/jrmarcello/wallet-api-appmax/actions/workflows/ci-cd.yml/badge.svg)
 ![PHP 8.3](https://img.shields.io/badge/PHP-8.3-777BB4?style=flat-square&logo=php)
 ![Laravel 11](https://img.shields.io/badge/Laravel-11-FF2D20?style=flat-square&logo=laravel)
 ![Architecture](https://img.shields.io/badge/Architecture-Event%20Sourcing-blueviolet?style=flat-square)
@@ -17,8 +17,8 @@ Todo o ambiente é containerizado. Você só precisa de **Docker** e **Make** in
 1. **Clone o repositório:**
 
    ```bash
-   git clone https://github.com/JrMarcello/wallet-api-appmax.git
-   cd wallet-api-staff
+   git clone https://github.com/jrmarcello/wallet-api-appmax.git
+   cd wallet-api-appmax
    ```
 
 2. **Execute o Setup Automático:**

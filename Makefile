@@ -28,8 +28,8 @@ setup:
 	
 	@echo "💾 Migrando banco principal..."
 	docker-compose exec app php artisan migrate:fresh --force
-	
-	@echo "✅ Setup concluído! API disponível em http://localhost:8000"
+
+	@echo "✅ Setup concluído! API: http://localhost:8000"
 
 # Reseta o banco de dados (Mantém containers rodando)
 reset-db:

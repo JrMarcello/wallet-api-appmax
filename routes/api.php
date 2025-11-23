@@ -4,6 +4,14 @@ use App\Http\Controllers\AuthController;
 use App\Http\Middleware\CheckIdempotency;
 use Illuminate\Support\Facades\Route;
 
+Route::get('/', function () {
+    return response()->json([
+        'app' => 'Wallet API',
+        'status' => 'running',
+        'docs' => 'Check README.md for usage',
+    ]);
+});
+
 // Rotas Públicas
 Route::group(['prefix' => 'auth'], function () {
     Route::post('register', [AuthController::class, 'register']);
