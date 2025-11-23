@@ -6,7 +6,12 @@ parameters:
     paths:
         - app
         - tests
-    
+
+    # Útil para manter compatibilidade entre Local (onde pode não dar erro) e CI (onde pode dar).
+    reportUnmatchedIgnoredErrors: false
+
     ignoreErrors:
         # O Pest usa $this magicamente nos arquivos de teste/config
         - '#Undefined variable: \$this#'
+        # Ignora erros de métodos mágicos da Facade JWTAuth que o Larastan não detecta
+        - '#Call to an undefined static method PHPOpenSourceSaver\\JWTAuth\\Facades\\JWTAuth::.*#'
