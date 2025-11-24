@@ -82,9 +82,9 @@ jobs:
   # -----------------------------------------------------------------
   build-image:
     name: 🐳 Build & Push Docker Image
-    needs: tests # Só roda se os testes passarem
+    needs: tests
     runs-on: ubuntu-latest
-    if: github.ref == 'refs/heads/main' # Só roda na branch main (CD)
+    if: github.ref == 'refs/heads/main'
     
     permissions:
       contents: read
@@ -107,14 +107,12 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-
       - name: Build and Push
         uses: docker/build-push-action@v5
         with:
           context: .
           push: true
+          platforms: linux/amd64,linux/arm64
           tags: |
             ghcr.io/${{ github.repository_owner }}/wallet-api:latest
             ghcr.io/${{ github.repository_owner }}/wallet-api:${{ github.sha }}
