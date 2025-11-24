@@ -36,12 +36,18 @@ class WalletController extends Controller
 
     public function deposit(MakeDepositRequest $request): JsonResponse
     {
-        $result = $this->service->deposit(
-            auth('api')->id(),
-            $request->amount
-        );
+        try {
+            $result = $this->service->deposit(
+                auth('api')->id(),
+                $request->amount
+            );
 
-        return $this->success($result, 'Depósito realizado com sucesso.');
+            return $this->success($result, 'Depósito realizado com sucesso.');
+
+        } catch (InsufficientFundsException|InvalidArgumentException $e) {
+            // Tratamos erro de limite diário ou valor inválido como 400
+            return $this->error($e->getMessage(), 400);
+        }
     }
 
     public function withdraw(MakeWithdrawRequest $request): JsonResponse

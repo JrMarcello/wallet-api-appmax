@@ -1,94 +1,100 @@
 # MISSION DIRECTIVE
 
-Você é Staff Engineer e maintainer desta API de carteira digital. Arquitetura: Event Sourcing + CQRS (Lite) + DDD. Priorize consistência, atomicidade e idempotência.
+Role: Staff Software Engineer.
+Goal: Maintain a High-Fidelity Digital Wallet API using Event Sourcing, CQRS (Lite) & DDD.
+Priorities: Strong Consistency (ACID), Idempotency, Code Quality (QA).
 
-## TECH & ENV
+---
 
-- PHP 8.2+ (strict types).
-- Laravel 11.x.
-- MySQL 8.0 (produção e testes), Redis (cache/fila).
-- PKs: ULID (`HasUlids`). Nunca UUIDv4 ou auto-increment.
-- Testes: Pest (feature-first) rodando em MySQL real.
+## 1. TECH STACK
 
-## ARQUITETURA (DDD + EVENT SOURCING)
+- **Core:** PHP 8.3, Laravel 11.x.
+- **Data:** MySQL 8.0 (Prod & Test), Redis (Cache & Queue).
+- **PK Strategy:** ULID (`HasUlids` trait). NO auto-increments. NO UUIDv4.
+- **Quality:** Pest PHP, PHPStan (Level 5+), Laravel Pint, CaptainHook.
 
-- Aggregates (write model): `app/Domain/Wallet` (puro PHP, sem Eloquent/container). Regras de negócio só aqui.
-- Eventos: `app/Domain/Wallet/Events` (DTOs imutáveis, nomes no passado).
-- Serviços de domínio/orquestração: `app/Domain/Wallet/Services`.
-- Projeções (read model): `app/Models` (Eloquent). Atualizadas sincronicamente na MESMA transação.
-- Controllers: finos; Validar input -> chamar serviço -> retornar DTO/Resource/ApiResponse.
-- Fonte da verdade: tabela `stored_events`. Read cache: tabela `wallets`.
-- Fluxo obrigatório de escrita:
-  1) `DB::transaction`
-  2) Lock pessimista na linha de `wallets`
-  3) Carrega histórico de `stored_events`
-  4) Replay do aggregate
-  5) Executa comando -> novo evento
-  6) Persiste evento em `stored_events`
-  7) Atualiza projeção `wallets`
-  8) Commit
+---
 
-## IDEMPOTÊNCIA
+## 2. ARCHITECTURE & PATTERNS
 
-- Middleware: `App\Http\Middleware\CheckIdempotency`.
-- POST `/deposit`, `/withdraw`, `/transfer` exigem header `Idempotency-Key`.
-- Chave existente: retorna resposta cacheada (status + JSON). Ausente: executa e cacheia (TTL 24h).
+### A. Write Model (The Hard Part)
 
-## DADOS & MONEY
+- **Aggregates:** `App\Domain\Wallet\WalletAggregate`. Pure PHP class. Handles math & invariant checks.
+- **Repository:** `App\Repositories\WalletRepository`. Handles Event Stream & Projections. Uses `EventSerializer`.
+- **Transaction Flow (Must follow):**
+  1. Start `DB::transaction`.
+  2. **Pessimistic Lock:** `Wallet::lockForUpdate()` (ordered IDs to prevent deadlocks in P2P).
+  3. **Compliance Check:** Verify Daily Limits (Config: `config/wallet.php`).
+  4. **Rehydrate:** Load events from `stored_events`, replay in Aggregate.
+  5. **Action:** Execute method -> Returns new Event DTO.
+  6. **Persist:** Save Event (`stored_events`) AND Update Projection (`wallets`).
+  7. **Async:** Dispatch Webhook Job (`SendTransactionNotification`).
+  8. Commit.
 
-- Valores monetários: `int` em centavos (100 = R$1,00). Não aceite floats/decimals de input.
-- Erros: use `App\Http\Responses\ApiResponse`.
-- Exceptions de domínio (ex.: `InsufficientFundsException`) mapeadas em `bootstrap/app.php` para 400/422.
+### B. Read Model
 
-## NOMES & CONVENÇÕES
+- **Source:** Table `wallets` (Projection updated synchronously).
+- **Usage:** Simple `SELECT` for `GET /balance`. No replay needed for read.
 
-- Eventos: verbo no passado (ex.: `FundsDeposited`, `FundsWithdrawn`, `TransferSent`).
-- Controllers: `ResourceActionController` (ex.: `WalletDepositController`) em vez de monolíticos.
-- Tabelas: plural (`users`, `wallets`, `stored_events`).
+### C. Idempotency
 
-## ESTRUTURA DE PASTAS
+- **Middleware:** `App\Http\Middleware\CheckIdempotency`.
+- **Rule:** Required for `POST`. Persists to Redis (Fast) and MySQL `idempotency_keys` (Audit).
+- **Behavior:** Hit returns cached JSON + header `X-Idempotency-Hit`.
 
+---
+
+## 3. CODE STANDARDS
+
+- **Money:** Integer always (Cents). No floats.
+- **Strict Typing:** `declare(strict_types=1);`. Use specialized Exceptions (e.g., `InsufficientFundsException`).
+- **Controller Safety:** Catch Domain Exceptions -> Return 400. Do NOT catch unexpected errors (Let 500 handler catch it).
+- **Webhooks:** URL stored in `users.webhook_url`. Handled by Queue Worker.
+
+## 4. DIRECTORY MAP
+
+```text
 app/
-├── Domain/
-│   └── Wallet/
-│       ├── Events/
-│       ├── WalletAggregate.php
-│       └── Services/
-├── Infrastructure/
-│   └── Services/        # integrações externas
+├── Domain/Wallet/       # PURE DOMAIN
+│   ├── Events/          # DTOs: FundsDeposited, TransferSent...
+│   ├── Exceptions/
+│   └── WalletAggregate.php
 ├── Http/
-│   ├── Controllers/
-│   ├── Requests/
-│   └── Responses/
-└── Models/              # projeções Eloquent
+│   ├── Controllers/     # WalletController, AuthController
+│   ├── Requests/        # Auth/*, Wallet/* (Strict Validation)
+│   └── Middleware/      # CheckIdempotency
+├── Infrastructure/      # Serializers
+├── Jobs/                # SendTransactionNotification (Webhooks)
+├── Models/              # User, Wallet, StoredEvent
+├── Repositories/        # WalletRepository
+└── Services/            # WalletTransactionService (Orchestrator)
+```
 
-## MIGRATIONS ATIVAS
+---
 
-- `0001_01_01_000000_create_users_table.php`
-- `0001_01_01_000002_create_jobs_table.php`
-- `2025_11_22_143155_create_wallet_domain_tables.php` (wallets, stored_events, idempotency_keys)
+## 5. DATABASE SCHEMA (Actual)
 
-## TESTES (PEST)
+We performed a cleanup. Only these migrations are active:
 
-- Sempre adicionar Feature Test por feature.
-- Cobrir: (1) happy path (wallets atualizado + stored_events criado), (2) invariant violation (`withdraw(balance+1)` lança e DB intacto), (3) race condition simulada (locks/mocks, saldo nunca negativo).
-- Testes usam MySQL real: `DB_CONNECTION=mysql`, DB `wallet_test`, user `walletuser`, pass `root` (ver `phpunit.xml`).
+1. `...create_users_table.php` (Includes `webhook_url` string).
+2. `...create_jobs_table.php` (Only `failed_jobs`).
+3. `...create_wallet_domain_tables.php` (wallets, stored_events, idempotency_keys).
 
-## COMANDOS MAKE (preferidos)
+*Tables Removed:* sessions, cache, personal_access_tokens, job_batches.
 
-- `make setup`: sobe containers, cria `wallet_test`, GRANT para `walletuser`, instala deps, gera keys/JWT, `migrate:fresh`.
-- `make test`: `docker-compose exec app ./vendor/bin/pest` (usa MySQL de teste).
-- `make reset`: recria DBs/grants, roda `migrate:fresh` (principal e teste), limpa cache.
-- `make race`: stress test de concorrência (`tests/race_test.sh`).
+---
 
-## DON’Ts (específicos)
+## 6. DEVELOPMENT COMMANDS (Makefile)
 
-- Não usar `increment()/decrement()` direto na projeção; sempre via evento.
-- Não esquecer `DB::transaction` em operações financeiras.
-- Não usar `float` em hints/assinaturas.
+- **Setup:** `make setup` (Full install + DB Creation).
+- **Reset:** `make reset-db` (Fresh migrations + Seeds users `sender`/`receiver`).
+- **Test:** `make test` (Runs Pest).
+- **QA:** `make check` (Runs Lint + PHPStan + Test).
+- **Concurrency:** `make race` (Bash script calling curl in parallel).
+- **Deep Clean:** `make clean` (Wipes docker volumes).
 
-## OBSERVAÇÕES
+## 7. DOCUMENTATION
 
-- `.gitignore` ignora `/docs`; remova se quiser versionar docs.
-- `storage/` diretórios padrão devem existir (`storage/framework/views` pode ser limpo com `php artisan view:clear`).
-- Insomnia: `insomnia_wallet_api.json` na raiz; `base_url` = `http://localhost:8000/api`; use webhook URL que sempre retorne 200 (mock/<https://webhook.site/>...).
+- **OpenAPI:** Removed L5-Swagger (Code bloat).
+- **Source of Truth:** `insomnia_wallet_api.json` (Import into Insomnia).
+- **Limits:** `WALLET_LIMIT_DAILY_DEPOSIT` & `WALLET_LIMIT_DAILY_WITHDRAWAL` in `.env`.

@@ -3,6 +3,7 @@
 use App\Models\User;
 use App\Models\Wallet;
 use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\Config;
 use PHPOpenSourceSaver\JWTAuth\Facades\JWTAuth;
 
 use function Pest\Laravel\assertDatabaseHas;
@@ -78,5 +79,31 @@ describe('Wallet Withdraw', function () {
             // Header omitido
         ])->assertStatus(400)
             ->assertJsonFragment(['message' => 'Header "Idempotency-Key" is required for state-changing operations.']);
+    });
+
+    test('cannot exceed daily withdrawal limit', function () {
+        // Limite R$ 50,00
+        Config::set('wallet.limits.daily_withdrawal', 5000);
+
+        $user = App\Models\User::factory()->create();
+        // Saldo alto (R$ 1.000,00) para garantir que o erro não seja "Saldo Insuficiente"
+        Wallet::create(['user_id' => $user->id, 'balance' => 100000, 'version' => 1]);
+        $token = JWTAuth::fromUser($user);
+
+        // Precisa criar saldo no Event Store ou o replay vai dar 0
+        postJson('/api/wallet/deposit', ['amount' => 100000], [
+            'Authorization' => "Bearer $token", 'Idempotency-Key' => 'setup',
+        ]);
+
+        // Saque dentro do limite (R$ 30,00)
+        postJson('/api/wallet/withdraw', ['amount' => 3000], [
+            'Authorization' => "Bearer $token", 'Idempotency-Key' => 'wd-1',
+        ])->assertStatus(200);
+
+        // Saque que estoura limite (R$ 30 + R$ 30 = 60 > 50)
+        postJson('/api/wallet/withdraw', ['amount' => 3000], [
+            'Authorization' => "Bearer $token", 'Idempotency-Key' => 'wd-2',
+        ])->assertStatus(400)
+            ->assertJsonFragment(['status' => 'error']);
     });
 });

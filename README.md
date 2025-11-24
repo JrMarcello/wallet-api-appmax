@@ -42,7 +42,7 @@ O projeto foi construído para resolver problemas reais de sistemas financeiros,
 
 * **Write Model:** Tabela `stored_events`. Fonte da verdade imutável.
 * **Read Model:** Tabela `wallets`. Projeção síncrona para leitura rápida de saldo.
-* **Por que:** Garante auditabilidade total e permite replay de transações. A lógica matemática reside no Agregado (`WalletAggregate`), isolada do framework.
+* **Por que:** Garante auditabilidade total e permite replay de transações. A lógica matemática reside no Agregado (`WalletAggregate`), isolada do framework (DDD).
 
 ### 2. Concorrência & Integridade
 
@@ -54,6 +54,14 @@ O projeto foi construído para resolver problemas reais de sistemas financeiros,
 * **Idempotency Key:** Middleware que intercepta o header `Idempotency-Key`. Requests duplicados (retries de rede) retornam a resposta original cacheada (Redis + DB Audit) sem duplicar a operação financeira.
 * **Async Webhooks:** Notificações são enviadas via **Fila (Redis)**, garantindo que a API responda rápido enquanto o processamento pesado ocorre em background com retries automáticos.
 
+### 4. Compliance & Limites Dinâmicos
+
+Implementação de limites diários utilizando a agregação de eventos em tempo real.
+
+* **Limites Separados:** Controle distinto para Entradas (Anti-Money Laundering) e Saídas (Security).
+* **Lógica Smart P2P:** Transferências internas entre usuários *não* consomem o limite de Saque (Cash-out), melhorando a experiência do usuário.
+* **Zero Coluna Extra:** O volume diário é calculado somando os payloads dos eventos (`FundsDeposited`, `FundsWithdrawn`) do dia corrente diretamente do Event Store.
+
 ---
 
 ## 🛠️ Comandos Úteis (Makefile)
@@ -62,7 +70,7 @@ Simplificamos a interação com o Docker através do `make`. Não é necessário
 
 | Comando | Descrição |
 | :--- | :--- |
-| `make setup` | **Primeiro uso.** Instala tudo do zero e configura hooks. |
+| `make setup` | **Primeiro uso.** Instala tudo do zero e configura o ambiente. |
 | `make up` | Sobe os containers (App, DB, Redis, Queue). |
 | `make down` | Para os containers. |
 | `make reset-db` | **Reseta o DB**, limpa cache e roda Seeds (cria users padrão). |
@@ -95,10 +103,25 @@ O projeto possui cobertura rigorosa utilizando **Pest PHP**.
 3. **Análise Estática:** **PHPStan Nível 5** + Larastan para garantir tipagem forte.
 4. **Stress Test:** Um script Bash (`tests/race_test.sh`) que dispara requisições paralelas via cURL para validar o sistema de Locks contra Race Conditions.
 
-Para rodar o check-up completo:
+Para rodar toda a suíte de qualidade:
 
 ```bash
 make check
+```
+
+---
+
+## ⚙️ Configuração
+
+As variáveis de ambiente críticas podem ser ajustadas no arquivo `.env`.
+
+```ini
+# Limites Financeiros (Em Centavos)
+WALLET_LIMIT_DAILY_DEPOSIT=1000000    # R$ 10.000,00
+WALLET_LIMIT_DAILY_WITHDRAWAL=200000  # R$ 2.000,00
+
+# Configuração JWT
+JWT_TTL=60 # Minutos
 ```
 
 ---
@@ -121,7 +144,7 @@ Na raiz do projeto, encontra-se o arquivo **`insomnia_wallet_api.json`**.
 * `POST /auth/register` - Cria usuário e carteira.
 * `POST /auth/login` - Retorna Token.
 * `POST /auth/refresh` - Rotaciona token (Blacklist no anterior).
-* `POST /auth/webhook` - Configura URL para notificação.
+* `POST /auth/webhook` - Configura URL para notificação de recebimento.
 
 #### Wallet
 
@@ -139,10 +162,10 @@ Na raiz do projeto, encontra-se o arquivo **`insomnia_wallet_api.json`**.
 
 O projeto conta com uma pipeline configurada em `.github/workflows/ci-cd.yml` que executa automaticamente em PRs para a `main`:
 
-1. **Build & Setup:** Sobe serviços (MySQL/Redis).
+1. **Build & Setup:** Sobe serviços (MySQL/Redis) em ambiente isolado.
 2. **Quality Gate:** Roda `Pint` (Lint) e `PHPStan` (Análise Estática).
 3. **Testing:** Executa a suíte `Pest` com banco de testes dedicado.
-4. **Delivery:** Se tudo passar, constrói a imagem Docker e publica no **GitHub Container Registry**.
+4. **Delivery:** Se tudo passar, constrói a imagem Docker (Multi-Arch AMD64/ARM64) e publica no **GitHub Container Registry**.
 
 ---
 
@@ -168,8 +191,10 @@ sequenceDiagram
     
     Note right of Service: Concorrência Pessimista
     Service->>DB: SELECT ... FOR UPDATE (Lock Ordenado)
-    Service->>DB: Busca histórico de eventos
     
+    Service->>Service: Check Daily Limits (Read Event Store)
+    
+    Service->>DB: Busca histórico de eventos
     Service->>Domain: Replay (Eventos) -> Reconstrói Estado
     Domain->>Domain: Valida Regras (Saldo Suficiente?)
     Domain-->>Service: Retorna Novos Eventos (Sent/Received)
@@ -188,4 +213,4 @@ sequenceDiagram
     API-->>Client: 200 OK
 ```
 
-**Autor:** Marcelo Jr
+**Autor:** [Marcelo Jr]

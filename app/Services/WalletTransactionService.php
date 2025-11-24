@@ -3,11 +3,13 @@
 namespace App\Services;
 
 use App\Domain\Wallet\WalletAggregate;
+use App\Jobs\SendTransactionNotification;
 use App\Models\Wallet;
 use App\Repositories\WalletRepository;
 use Exception;
 use Illuminate\Database\DatabaseManager;
 use Illuminate\Support\Facades\Log;
+use InvalidArgumentException;
 
 class WalletTransactionService
 {
@@ -15,6 +17,14 @@ class WalletTransactionService
         protected WalletRepository $repository,
         protected DatabaseManager $db
     ) {}
+
+    /**
+     * Obtém o saldo atual da carteira do usuário
+     */
+    public function getBalance(string $userId): int
+    {
+        return Wallet::where('user_id', $userId)->value('balance') ?? 0;
+    }
 
     /**
      * Executa um Depósito Atômico
@@ -28,8 +38,10 @@ class WalletTransactionService
             return $this->db->transaction(function () use ($userId, $amount, $ctx) {
                 $walletModel = Wallet::where('user_id', $userId)->lockForUpdate()->firstOrFail();
                 $walletId = $walletModel->id;
-
                 $ctx['wallet_id'] = $walletId;
+
+                // Verificar Limite de DEPÓSITO Diário
+                $this->ensureDailyDepositLimit($walletId, $amount);
 
                 $history = $this->repository->getHistory($walletId);
                 $aggregate = WalletAggregate::retrieve($walletId, $history);
@@ -39,9 +51,7 @@ class WalletTransactionService
                 $this->repository->append($newEvent);
                 $this->repository->updateProjection($walletId, $aggregate->getBalance());
 
-                Log::info('Wallet Deposit: Success', array_merge($ctx, [
-                    'new_balance' => $aggregate->getBalance(),
-                ]));
+                Log::info('Wallet Deposit: Success', array_merge($ctx, ['new_balance' => $aggregate->getBalance()]));
 
                 return [
                     'wallet_id' => $walletId,
@@ -67,7 +77,9 @@ class WalletTransactionService
             return $this->db->transaction(function () use ($userId, $amount, $ctx) {
                 $walletModel = Wallet::where('user_id', $userId)->lockForUpdate()->firstOrFail();
                 $walletId = $walletModel->id;
-                $ctx['wallet_id'] = $walletId;
+
+                // Verificar Limite de SAÍDA Diário
+                $this->ensureDailyWithdrawalLimit($walletId, $amount);
 
                 $history = $this->repository->getHistory($walletId);
                 $aggregate = WalletAggregate::retrieve($walletId, $history);
@@ -77,9 +89,7 @@ class WalletTransactionService
                 $this->repository->append($newEvent);
                 $this->repository->updateProjection($walletId, $aggregate->getBalance());
 
-                Log::info('Wallet Withdraw: Success', array_merge($ctx, [
-                    'new_balance' => $aggregate->getBalance(),
-                ]));
+                Log::info('Wallet Withdraw: Success', array_merge($ctx, ['new_balance' => $aggregate->getBalance()]));
 
                 return [
                     'wallet_id' => $walletId,
@@ -92,49 +102,34 @@ class WalletTransactionService
         }
     }
 
-    public function getBalance(string $userId): int
-    {
-        return Wallet::where('user_id', $userId)->value('balance') ?? 0;
-    }
-
     /**
      * Executa Transferência P2P Atômica
      */
     public function transfer(string $payerUserId, string $payeeUserId, int $amount): array
     {
-        $ctx = [
-            'payer_user_id' => $payerUserId,
-            'payee_user_id' => $payeeUserId,
-            'amount' => $amount,
-            'operation' => 'transfer_p2p',
-        ];
-
+        $ctx = ['payer_user_id' => $payerUserId, 'payee_user_id' => $payeeUserId, 'amount' => $amount, 'operation' => 'transfer_p2p'];
         Log::info('P2P Transfer: Start', $ctx);
 
         if ($payerUserId === $payeeUserId) {
-            Log::warning('P2P Transfer: Blocked (Self Transfer)', $ctx);
-            throw new \InvalidArgumentException('Cannot transfer to self');
+            throw new InvalidArgumentException('Cannot transfer to self');
         }
 
         try {
             return $this->db->transaction(function () use ($payerUserId, $payeeUserId, $amount, $ctx) {
-                // Lock Strategy
                 $payerWalletId = Wallet::where('user_id', $payerUserId)->value('id');
                 $payeeWalletId = Wallet::where('user_id', $payeeUserId)->value('id');
 
                 if (! $payerWalletId || ! $payeeWalletId) {
-                    throw new \Exception('One or both users do not have a wallet configured.');
+                    throw new Exception('Wallets not found.');
                 }
 
                 $idsToLock = [$payerWalletId, $payeeWalletId];
                 sort($idsToLock);
+                Wallet::whereIn('id', $idsToLock)->lockForUpdate()->get();
 
-                // Mostra a ordem do Lock. Vital para debugar Deadlocks.
-                Log::debug('P2P Transfer: Acquiring Locks', ['sorted_lock_ids' => $idsToLock]);
+                // Verificar Limite de SAÍDA Diário
+                // $this->ensureDailyWithdrawalLimit($payerWalletId, $amount);
 
-                $lockedWallets = Wallet::whereIn('id', $idsToLock)->lockForUpdate()->get();
-
-                // Replay
                 $payerHistory = $this->repository->getHistory($payerWalletId);
                 $payerAggregate = WalletAggregate::retrieve($payerWalletId, $payerHistory);
 
@@ -144,22 +139,15 @@ class WalletTransactionService
                 $eventSent = $payerAggregate->sendTransfer($payeeWalletId, $amount);
                 $eventReceived = $payeeAggregate->receiveTransfer($payerWalletId, $amount);
 
-                // Persistência
                 $this->repository->append($eventSent);
                 $this->repository->updateProjection($payerWalletId, $payerAggregate->getBalance());
 
                 $this->repository->append($eventReceived);
                 $this->repository->updateProjection($payeeWalletId, $payeeAggregate->getBalance());
 
-                // Webhook
-                Log::info('P2P Transfer: Dispatching Webhook Job', ['payee_user_id' => $payeeUserId]);
-                \App\Jobs\SendTransactionNotification::dispatch($payeeUserId, $amount);
+                SendTransactionNotification::dispatch($payeeUserId, $amount);
 
-                Log::info('P2P Transfer: Success', array_merge($ctx, [
-                    'payer_wallet_id' => $payerWalletId,
-                    'payee_wallet_id' => $payeeWalletId,
-                    'final_payer_balance' => $payerAggregate->getBalance(),
-                ]));
+                Log::info('P2P Transfer: Success', $ctx);
 
                 return [
                     'transaction_id' => $payerWalletId.'-'.time(),
@@ -170,6 +158,36 @@ class WalletTransactionService
         } catch (Exception $e) {
             Log::error('P2P Transfer: Failed - '.$e->getMessage(), $ctx);
             throw $e;
+        }
+    }
+
+    /**
+     * Helper de Validação de Limite de Saída
+     */
+    private function ensureDailyWithdrawalLimit(string $walletId, int $amount): void
+    {
+        $limit = config('wallet.limits.daily_withdrawal');
+        $usedToday = $this->repository->getDailyOutgoingVolume($walletId);
+
+        if (($usedToday + $amount) > $limit) {
+            throw new InvalidArgumentException(
+                sprintf('Daily withdrawal/transfer limit exceeded. Used: %d, Limit: %d', $usedToday, $limit)
+            );
+        }
+    }
+
+    /**
+     * Helper de Validação de Limite de Depósito
+     */
+    private function ensureDailyDepositLimit(string $walletId, int $amount): void
+    {
+        $limit = config('wallet.limits.daily_deposit');
+        $usedToday = $this->repository->getDailyIncomingVolume($walletId);
+
+        if (($usedToday + $amount) > $limit) {
+            throw new InvalidArgumentException(
+                sprintf('Daily deposit limit exceeded. Used: %d, Limit: %d', $usedToday, $limit)
+            );
         }
     }
 }

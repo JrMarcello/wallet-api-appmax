@@ -2,7 +2,9 @@
 
 use App\Models\User;
 use App\Models\Wallet;
+use Illuminate\Http\Client\Request;
 use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\Config;
 use Illuminate\Support\Facades\Http;
 use PHPOpenSourceSaver\JWTAuth\Facades\JWTAuth;
 
@@ -44,6 +46,35 @@ describe('Wallet Transfer', function () {
         assertDatabaseHas('wallets', ['user_id' => $userB->id, 'balance' => 400]);
     });
 
+    test('transfer does not consume withdrawal daily limit', function () {
+        // Setup: Limite de Saque baixo (R$ 100,00)
+        Config::set('wallet.limits.daily_withdrawal', 10000);
+
+        $userA = User::factory()->create();
+        Wallet::create(['user_id' => $userA->id, 'balance' => 0, 'version' => 1]);
+        $tokenA = JWTAuth::fromUser($userA);
+
+        $userB = User::factory()->create(); // Destino
+        Wallet::create(['user_id' => $userB->id]);
+        // Deposito inicial em A (R$ 500,00)
+        postJson('/api/wallet/deposit', ['amount' => 50000], [
+            'Authorization' => "Bearer $tokenA", 'Idempotency-Key' => 'setup',
+        ]);
+
+        // Transferir R$ 200,00 (Acima do limite de saque de 100)
+        postJson('/api/wallet/transfer', [
+            'target_email' => $userB->email,
+            'amount' => 20000,
+        ], [
+            'Authorization' => "Bearer $tokenA", 'Idempotency-Key' => 'trans-1',
+        ])->assertStatus(200);
+
+        // Agora tentar sacar o limite total (R$ 100,00)
+        postJson('/api/wallet/withdraw', ['amount' => 10000], [
+            'Authorization' => "Bearer $tokenA", 'Idempotency-Key' => 'wd-check',
+        ])->assertStatus(200);
+    });
+
     test('cannot transfer to self', function () {
         $user = User::factory()->create();
         Wallet::create(['user_id' => $user->id, 'balance' => 0, 'version' => 1]);
@@ -70,26 +101,26 @@ describe('Wallet Transfer', function () {
     });
 
     test('transfer triggers webhook notification to target user url', function () {
-        // 1. Mock do HTTP (Impede requisição real e permite verificação)
-        Illuminate\Support\Facades\Http::fake();
+        // Mock do HTTP
+        Http::fake();
 
-        // 2. Setup A (Sender)
+        // Setup A (Sender)
         $userA = User::factory()->create();
         Wallet::create(['user_id' => $userA->id, 'balance' => 0, 'version' => 1]);
         $tokenA = JWTAuth::fromUser($userA);
 
-        // 3. Setup B (Receiver) com Webhook Configurado
+        // Setup B (Receiver) com Webhook Configurado
         $targetUrl = 'https://loja-do-b.com/notify';
         $userB = User::factory()->create(['email' => 'receiver-web@test.com', 'webhook_url' => $targetUrl]);
         Wallet::create(['user_id' => $userB->id, 'balance' => 0, 'version' => 1]);
 
-        // 4. Depósito inicial em A
+        // Depósito inicial em A
         postJson('/api/wallet/deposit', ['amount' => 1000], [
             'Authorization' => "Bearer $tokenA",
             'Idempotency-Key' => 'setup-'.uniqid(),
         ]);
 
-        // 5. Transferir A -> B
+        // Transferir A -> B
         postJson('/api/wallet/transfer', [
             'target_email' => $userB->email,
             'amount' => 500,
@@ -98,9 +129,9 @@ describe('Wallet Transfer', function () {
             'Idempotency-Key' => 'trans-webhook-'.uniqid(),
         ])->assertStatus(200);
 
-        // 6. Asserção: Verifique se o sistema tentou chamar a URL do User B
+        // Verifica se o sistema tentou chamar a URL do User B
         // Nota: Em testes, o Queue driver padrão é 'sync', então o job roda na hora.
-        Http::assertSent(function (\Illuminate\Http\Client\Request $request) use ($targetUrl) {
+        Http::assertSent(function (Request $request) use ($targetUrl) {
             return $request->url() == $targetUrl &&
                    $request['event'] == 'transfer_received' &&
                    $request['amount'] == 500;
