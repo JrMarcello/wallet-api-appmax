@@ -22,27 +22,52 @@ class WalletAggregate
     }
 
     /**
-     * APLICA o evento no estado interno (Mutação matemática)
+     * Aplica um evento ao estado atual da carteira.
+     *
+     * Usa convenção de nomenclatura: apply{NomeDoEvento}
      */
     private function apply(object $event): object
     {
-        if ($event instanceof FundsDeposited) {
-            $this->balance += $event->amount;
-        }
+        $eventClass = (new \ReflectionClass($event))->getShortName();
+        $method = 'apply'.$eventClass;
 
-        if ($event instanceof TransferReceived) {
-            $this->balance += $event->amount;
-        }
-
-        if ($event instanceof FundsWithdrawn) {
-            $this->balance -= $event->amount;
-        }
-
-        if ($event instanceof TransferSent) {
-            $this->balance -= $event->amount;
+        if (method_exists($this, $method)) {
+            $this->$method($event);
         }
 
         return $event;
+    }
+
+    /**
+     * Handler: Aplica depósito de fundos.
+     */
+    private function applyFundsDeposited(FundsDeposited $event): void
+    {
+        $this->balance += $event->amount;
+    }
+
+    /**
+     * Handler: Aplica recebimento de transferência.
+     */
+    private function applyTransferReceived(TransferReceived $event): void
+    {
+        $this->balance += $event->amount;
+    }
+
+    /**
+     * Handler: Aplica saque de fundos.
+     */
+    private function applyFundsWithdrawn(FundsWithdrawn $event): void
+    {
+        $this->balance -= $event->amount;
+    }
+
+    /**
+     * Handler: Aplica envio de transferência.
+     */
+    private function applyTransferSent(TransferSent $event): void
+    {
+        $this->balance -= $event->amount;
     }
 
     /**
@@ -62,7 +87,7 @@ class WalletAggregate
     }
 
     /**
-     * --- ACTIONS (Comportamentos de Escrita) ---
+     * Executa um depósito na carteira.
      */
     public function deposit(int $amount): FundsDeposited
     {
@@ -80,6 +105,9 @@ class WalletAggregate
 
     }
 
+    /**
+     * Executa um saque na carteira.
+     */
     public function withdraw(int $amount): FundsWithdrawn
     {
         if ($amount <= 0) {
@@ -99,6 +127,9 @@ class WalletAggregate
         );
     }
 
+    /**
+     * Executa uma transferência para outra carteira.
+     */
     public function sendTransfer(string $targetWalletId, int $amount): TransferSent
     {
         if ($amount <= 0) {
@@ -118,6 +149,9 @@ class WalletAggregate
         );
     }
 
+    /**
+     * Executa o recebimento de uma transferência de outra carteira.
+     */
     public function receiveTransfer(string $sourceWalletId, int $amount): TransferReceived
     {
         return $this->apply(
@@ -130,6 +164,9 @@ class WalletAggregate
         );
     }
 
+    /**
+     * Obtém o saldo atual da carteira.
+     */
     public function getBalance(): int
     {
         return $this->balance;
